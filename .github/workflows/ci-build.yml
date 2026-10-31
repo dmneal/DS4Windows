@@ -178,11 +178,19 @@ jobs:
             }
           }
 
-      - name: Upgrade from published RC4.5.5 and preserve profiles
+      - name: Validate MSI upgrade metadata without installation
         shell: pwsh
         run: |
           $msi = (Resolve-Path ".\installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${{ env.PRODUCT_VERSION }}_x64.msi").Path
           .\utils\test-msi-upgrade-metadata.ps1 -ExistingMsi $msi -ExpectedVersion "${{ env.PRODUCT_VERSION }}"
+
+      # Match the fixture's repository allowlist; forks retain the read-only
+      # metadata check above without bypassing the installation safety guard.
+      - name: Upgrade from published RC4.5.5 and preserve profiles
+        if: github.repository == 'hbashton/DS4Windows' || github.repository == 'Pav-Osmolski/DS4Windows'
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path ".\installer\DS4Windows.Package\bin\x64\Release\DS4Windows_${{ env.PRODUCT_VERSION }}_x64.msi").Path
           .\utils\test-previous-msi-upgrade.ps1 -NewMsi $msi -ExpectedVersion "${{ env.PRODUCT_VERSION }}"
 
       - name: Preserve installer lifecycle evidence
