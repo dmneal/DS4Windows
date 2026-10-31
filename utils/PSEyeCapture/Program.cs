@@ -257,7 +257,11 @@ sealed class Preview : Form
         Shown+=(_,_)=>cameraLayout.SplitterDistance=Math.Max(100,cameraLayout.Width-460);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
         var tvTab=new TabPage("TV calibration");
-        tvTab.Controls.Add(new TvSurveyPanel(nativePose));tabs.TabPages.Add(tvTab);
+        var tvModes=new TabControl {Dock=DockStyle.Fill};
+        var measurementTab=new TabPage("Measurement calibration");measurementTab.Controls.Add(new TvSurveyPanel(nativePose));
+        var pointingTab=new TabPage("Pointing test");pointingTab.Controls.Add(new TvPointingTestPanel(nativePose));
+        tvModes.TabPages.AddRange([measurementTab,pointingTab]);tvTab.Controls.Add(tvModes);tabs.TabPages.Add(tvTab);
+        if(Environment.GetCommandLineArgs().Contains("--pointing-test")) {tvModes.SelectedTab=pointingTab;tabs.SelectedTab=tvTab;}
         if(tvCalibration) tabs.SelectedTab=tvTab;
         var gyroTab=new TabPage("Gyro calibration"); gyroTab.Controls.Add(new GyroCalibrationPanel(()=>serviceFolder.Text)); tabs.TabPages.Add(gyroTab);
         var fusionTab=new TabPage("Fusion / tuning");
