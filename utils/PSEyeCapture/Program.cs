@@ -12,6 +12,13 @@ static class Program
     {
         int directoryIndex = Array.IndexOf(args, "--service-dir");
         string serviceDirectory = directoryIndex >= 0 && directoryIndex + 1 < args.Length ? args[directoryIndex + 1] : FindServiceDirectory();
+        if(args.Contains("--restart-service-only")) {
+            try {
+                ServiceControl.Restart(serviceDirectory,text=>File.AppendAllText(Path.Combine(AppContext.BaseDirectory,"service-restart.log"),DateTime.UtcNow.ToString("O")+" "+text+Environment.NewLine)).GetAwaiter().GetResult();
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"service-directory.txt"),Path.GetFullPath(serviceDirectory));
+            } catch(Exception ex) {File.AppendAllText(Path.Combine(AppContext.BaseDirectory,"service-restart.log"),ex+Environment.NewLine);Environment.ExitCode=1;}
+            return;
+        }
         if(args.Contains("--stationary-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode=NativePoseProbe(serviceDirectory,true); return; }
         if(args.Contains("--native-pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode=NativePoseProbe(serviceDirectory); return; }
         if (args.Contains("--pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode = PoseProbe(); return; }
@@ -73,6 +80,11 @@ static class Program
     }
     static string FindServiceDirectory()
     {
+        string saved=Path.Combine(AppContext.BaseDirectory,"service-directory.txt");
+        if(File.Exists(saved)) {
+            string directory=File.ReadAllText(saved).Trim();
+            if(File.Exists(Path.Combine(directory,"PSMoveService.exe"))) return directory;
+        }
         var processes = Process.GetProcessesByName("PSMoveService");
         try {
             if (processes.Length == 1) {
@@ -194,9 +206,25 @@ sealed class Preview : Form
         start.Click += async (_, _) => { start.Enabled = false; await StopCapture(); StartCapture(); start.Enabled = true; };
         var halt = new Button { Text = "Stop", AutoSize = true };
         halt.Click += async (_, _) => await StopCapture();
+        var restartService = new Button { Text = "Restart tracking service", AutoSize = true };
+        var serviceStatus = new Label { AutoSize=true, Text="Service: checking…" };
+        bool restartingService=false;
+        restartService.Click += async (_,_) => {
+            restartingService=true; restartService.Enabled=start.Enabled=halt.Enabled=false;
+            try {
+                await StopCapture();
+                await ServiceControl.Restart(Path.GetFullPath(serviceFolder.Text),text=>serviceStatus.Text=text);
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"service-directory.txt"),Path.GetFullPath(serviceFolder.Text));
+                StartCapture();
+            } catch(Exception ex) { serviceStatus.Text="Restart failed: "+ex.Message; }
+            finally { restartingService=false; restartService.Enabled=start.Enabled=halt.Enabled=true; }
+        };
+        var serviceTimer=new System.Windows.Forms.Timer {Interval=1000};
+        serviceTimer.Tick+=(_,_)=> {if(!restartingService) serviceStatus.Text=ServiceControl.Running(serviceFolder.Text)?"Service process: running":"Service stopped — click Restart tracking service";};
+        serviceTimer.Start(); FormClosed+=(_,_)=>serviceTimer.Dispose();
         var browse = new Button { Text = "Service folder…", AutoSize = true };
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { Description = "Select PSMoveServiceEx's working directory (containing shared_mem)", SelectedPath = serviceFolder.Text }; if (dialog.ShowDialog(this) == DialogResult.OK) serviceFolder.Text = dialog.SelectedPath; };
-        bar.Controls.AddRange([new Label { Text = "Service tracker index", AutoSize = true },camera,start,halt,
+        bar.Controls.AddRange([new Label { Text = "Service tracker index", AutoSize = true },camera,start,halt,restartService,serviceStatus,
             browse,serviceFolder,new Label { Text = "Configure exposure, gain and frame rate in PSMoveServiceEx Config Tool.", AutoSize = true },status]);
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var poseTab = new TabPage("1 · Controller in 3D");
