@@ -8,5 +8,7 @@
   <ItemGroup>
     <Compile Include="../../DS4Windows/DS4Control/OpticalTracking/*.cs" Link="Tracking/%(Filename)%(Extension)" />
     <Compile Include="../PSEyeCapture/FrameProtocol.cs" Link="FrameProtocol.cs" />
+    <Compile Include="../PSEyeCapture/ControllerMotion.cs" Link="ControllerMotion.cs" />
+    <Compile Include="../PSEyeCapture/PoseGeometry.cs" Link="PoseGeometry.cs" />
   </ItemGroup>
 </Project>

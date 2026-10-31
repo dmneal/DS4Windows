@@ -2,6 +2,7 @@
 using DS4Windows.OpticalTracking;
 using PSEyeCapture;
 using System.Buffers.Binary;
+using System.Numerics;
 
 int checks = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception(name); checks++; }
@@ -68,3 +69,44 @@ Header(20,int.MaxValue); Throws<InvalidDataException>(()=>FrameHeader.Parse(head
 Header(20,921600); Header(4,2); Throws<InvalidDataException>(()=>FrameHeader.Parse(header),"protocol version rejected");
 Throws<InvalidDataException>(()=>FrameHeader.Parse(new byte[3]),"truncated header rejected");
 Console.WriteLine($"PASS: {checks} optical detection, association, calibration, freshness and frame protocol checks");
+
+var motion = new MotionAttitude();
+uint seq = 0; ulong us = 0; long host = 0;
+void Move(Vector3 rates,Vector3? acceleration=null) => motion.Update(new MotionSample(++seq,us+=10000,1,1,acceleration??new Vector3(0,-1,0),rates),host+=10000,1_000_000);
+Move(Vector3.Zero);
+for(int i=0;i<100;i++) Move(new Vector3(0,90,0));
+var state=motion.Snapshot(host,1_000_000);
+Check(state.Fresh && state.Connection==1,"USB attitude freshness");
+var aim=Vector3.Transform(-Vector3.UnitZ,state.Orientation);
+Check(aim.X>0.999 && Math.Abs(aim.Z)<0.001,"one-second right yaw integration");
+Check(Math.Abs(state.Orientation.Length()-1)<1e-6,"orientation stays normalized");
+motion.Update(new MotionSample(seq,us,1,1,new(0,-1,0),new(0,90,0)),host,1_000_000);
+Check(motion.Snapshot(host,1_000_000).Samples==state.Samples,"duplicate motion packet ignored");
+Check(!motion.Snapshot(host+300000,1_000_000).Fresh,"stale motion not shown as tracked");
+host+=300000; Move(Vector3.Zero);
+Check(Vector3.Distance(Vector3.Transform(-Vector3.UnitZ,motion.Snapshot(host,1_000_000).Orientation),-Vector3.UnitZ)<1e-5,"dropout rebaselines attitude");
+motion.BeginBiasCalibration();
+for(int i=0;i<110;i++) Move(new Vector3(0,1,0));
+Check(motion.Snapshot(host,1_000_000).Calibration.Contains("measured"),"stationary bias completed");
+motion.SetForward();
+for(int i=0;i<100;i++) Move(new Vector3(0,1,0));
+Check(Vector3.Distance(Vector3.Transform(-Vector3.UnitZ,motion.Snapshot(host,1_000_000).Orientation),-Vector3.UnitZ)<1e-5,"measured yaw bias removed");
+var tilted=new MotionAttitude();
+tilted.Update(new(1,10000,2,1,new(0,0,-1),Vector3.Zero),10000,1_000_000);
+Check(Vector3.Distance(Vector3.Transform(new(0,0,-1),tilted.Snapshot(10000,1_000_000).Orientation),new(0,-1,0))<1e-5,"gravity initializes tilt");
+var corners=PoseGeometry.Corners(Quaternion.Identity,Vector3.Zero);
+Check(Math.Abs(corners.Max(v=>v.X)-corners.Min(v=>v.X)-0.162)<1e-6,"box width in meters");
+Check(Math.Abs(corners.Max(v=>v.Y)-corners.Min(v=>v.Y)-0.052)<1e-6,"box height in meters");
+Check(Math.Abs(corners.Max(v=>v.Z)-corners.Min(v=>v.Z)-0.098)<1e-6,"box depth in meters");
+var rotated=PoseGeometry.Corners(Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI/2),new(1,2,3));
+Check(Math.Abs(rotated.Max(v=>v.X)-rotated.Min(v=>v.X)-0.098)<1e-6 && Vector3.Distance(rotated.Aggregate(Vector3.Zero,(s,v)=>s+v)/8,new(1,2,3))<1e-6,"box rotation and translation preserve dimensions/center");
+Check(MotionProtocol.Crc("123456789"u8)==0xcbf43926,"DSU CRC vector");
+byte[] packet=new byte[100]; "DSUS"u8.CopyTo(packet);
+BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(4),1001); BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(6),84);
+BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(16),0x100002); packet[21]=2; packet[23]=1; packet[31]=0; // DS4Windows 3.0.18 leaves activity at zero
+BitConverter.GetBytes(-1f).CopyTo(packet,80); BitConverter.GetBytes(45f).CopyTo(packet,92);
+BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(8),MotionProtocol.Crc(packet));
+Check(MotionProtocol.Parse(packet) is {Connection:1,PitchYawRoll.Y:45},"DSU axes and transport decode");
+packet[92]^=1; Check(MotionProtocol.Parse(packet)==null,"corrupt motion packet rejected");
+Check(MotionProtocol.Parse(new byte[50])==null,"truncated motion packet rejected");
+Console.WriteLine($"PASS: {checks} total tracking, attitude, transport and 3D geometry checks");

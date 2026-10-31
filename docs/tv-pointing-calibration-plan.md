@@ -2,6 +2,8 @@
 
 Status: implementation plan, not an implemented fusion or calibration feature.
 
+The [fused-pose audit](psmoveserviceex-fusion-audit.md) verifies existing SDK getters and the measured wired-controller gap. Production fusion should reuse the service pipeline. The new gravity-aided 3D IMU preview is diagnostic only.
+
 ## Product goal and confirmed setup
 
 The user points a DualShock 4 at a TV with a normal two-handed grip. The PS Eye is fixed at the base of the TV, facing the user. The pointer should follow where the controller is aimed while the user changes position in the normal seating/standing area. Camera and controller data should produce the best supported estimate, with visible confidence and an easy recenter action when tracking is insufficient.
@@ -44,6 +46,10 @@ First record and inspect actual controller stream timestamps, changing IMU value
 Preferred ownership is DS4Windows for USB HID/LED/buttons and PSMoveServiceEx for optical tracking/fusion. If the service cannot accept DS4Windows' timestamped IMU samples through an existing suitable path, make that an explicit service-adapter extension using its DS4 tracking shape and filter inputs. Do not invent a compatible network endpoint or describe the existing external-orientation pipe as a raw-IMU fusion API: that filter accepts an external orientation and does not establish the full required bridge. A separate PSMoveServiceEx change may be necessary. Do not switch to Bluetooth or re-pair the user's controller as an implicit workaround.
 
 ## User-facing calibration flow
+
+### 0. Controller in 3D
+
+Begin with an orbitable box matching approximate DS4 dimensions (162×52×98 mm), a marked light-bar edge and a pointing arrow. Show position, orientation and optical validity independently. The initial view follows live DS4Windows DSU relative attitude with gravity-aided tilt; absolute position is untracked and the box sits at an explicitly labelled display anchor. When the service bridge supplies valid fused pose, render it directly without filtering it again. Include forward-reference and gyro-readiness actions, and validate physical pitch/yaw/roll directions with guided movements before TV targets.
 
 ### 1. Camera readiness
 

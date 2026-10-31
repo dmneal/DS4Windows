@@ -37,6 +37,9 @@ struct Api {
     FUNCTION(PSM_StartTrackerDataStream); FUNCTION(PSM_StopTrackerDataStream);
     FUNCTION(PSM_OpenTrackerVideoStream); FUNCTION(PSM_CloseTrackerVideoStream);
     FUNCTION(PSM_PollTrackerVideoStream); FUNCTION(PSM_GetTrackerVideoFrameBuffer); FUNCTION(PSM_GetTrackerWidth);
+    FUNCTION(PSM_GetControllerList); FUNCTION(PSM_GetController); FUNCTION(PSM_GetControllerPose);
+    FUNCTION(PSM_AllocateControllerListener); FUNCTION(PSM_FreeControllerListener);
+    FUNCTION(PSM_StartControllerDataStream); FUNCTION(PSM_StopControllerDataStream);
 #undef FUNCTION
     bool load() {
         wchar_t path[32768]; DWORD n = GetModuleFileNameW(nullptr, path, 32768);
@@ -52,22 +55,84 @@ struct Api {
         LOAD(PSM_StartTrackerDataStream); LOAD(PSM_StopTrackerDataStream);
         LOAD(PSM_OpenTrackerVideoStream); LOAD(PSM_CloseTrackerVideoStream);
         LOAD(PSM_PollTrackerVideoStream); LOAD(PSM_GetTrackerVideoFrameBuffer); LOAD(PSM_GetTrackerWidth);
+        LOAD(PSM_GetControllerList); LOAD(PSM_GetController); LOAD(PSM_GetControllerPose);
+        LOAD(PSM_AllocateControllerListener); LOAD(PSM_FreeControllerListener);
+        LOAD(PSM_StartControllerDataStream); LOAD(PSM_StopControllerDataStream);
 #undef LOAD
         return true;
     }
     ~Api() { if (library) FreeLibrary(library); }
 };
 
+static int audit_pose(Api& api) {
+    PSMControllerList controllers = {};
+    if (api.PSM_GetControllerList(&controllers,2000) != PSMResult_Success) return 7;
+    int id = -1;
+    for (int i=0;i<controllers.count && i<PSMOVESERVICE_MAX_CONTROLLER_COUNT;i++) {
+        std::fprintf(stderr,"Controller %d: type %d\n",controllers.controller_id[i],controllers.controller_type[i]);
+        if (id<0 && controllers.controller_type[i]==PSMController_DualShock4) id=controllers.controller_id[i];
+    }
+    if (id<0) {
+        const char* json="{\"ControllerFound\":false,\"Reason\":\"No DS4 in the service controller list\"}\n";
+        write_all(json,std::strlen(json)); return 0;
+    }
+    if (api.PSM_AllocateControllerListener(id)!=PSMResult_Success) return 7;
+    unsigned flags=PSMStreamFlags_includePositionData | PSMStreamFlags_includePhysicsData |
+        PSMStreamFlags_includeRawSensorData | PSMStreamFlags_includeCalibratedSensorData | PSMStreamFlags_includeRawTrackerData;
+    PSMResult start=api.PSM_StartControllerDataStream(id,flags,2000);
+    int freshFrames=0, validPoses=0, trackedFrames=0, orientationFrames=0, positionFrames=0;
+    int lastSequence=-1; double firstSensor=-1,lastSensor=-1;
+    auto begun=std::chrono::steady_clock::now();
+    if(start==PSMResult_Success) {
+        while(std::chrono::steady_clock::now()-begun<std::chrono::seconds(2)) {
+            if(api.PSM_Update()!=PSMResult_Success) break;
+            const auto* c=api.PSM_GetController(id);
+            if(c && c->ControllerType==PSMController_DualShock4 && c->IsConnected && c->bValid &&
+                c->DataFrameLastReceivedTime>0 && c->OutputSequenceNum!=lastSequence) {
+                lastSequence=c->OutputSequenceNum; freshFrames++;
+                const auto& s=c->ControllerState.PSDS4State;
+                if(s.bIsOrientationValid) orientationFrames++;
+                if(s.bIsPositionValid) positionFrames++;
+                if(s.bIsCurrentlyTracking) trackedFrames++;
+                PSMPosef pose={}; if(api.PSM_GetControllerPose(id,&pose)==PSMResult_Success) validPoses++;
+                lastSensor=s.CalibratedSensorData.TimeInSeconds;
+                if(firstSensor<0) firstSensor=lastSensor;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+    const auto* c=api.PSM_GetController(id);
+    const bool ds4=c && c->ControllerType==PSMController_DualShock4;
+    const auto s=ds4?c->ControllerState.PSDS4State:PSMDualShock4{};
+    PSMPosef pose={}; PSMResult poseResult=api.PSM_GetControllerPose(id,&pose);
+    char json[2048];
+    std::snprintf(json,sizeof(json),
+        "{\"ControllerFound\":true,\"ControllerId\":%d,\"Connection\":\"%s\",\"StreamStartResult\":%d,"
+        "\"ObservationSeconds\":2,\"FreshStateFrames\":%d,\"ValidPoseFrames\":%d,\"OpticallyTrackedFrames\":%d,"
+        "\"OrientationValidFrames\":%d,\"PositionValidFrames\":%d,\"LastPoseGetterResult\":%d,"
+        "\"LastOrientationValid\":%s,\"LastPositionValid\":%s,\"LastOpticallyTracking\":%s,"
+        "\"SensorClockAdvanced\":%s,\"RawTrackerMask\":%u,\"CrossButtonState\":%d}\n",
+        id,ds4 && s.ConnectionType==PSMConnectionType_USB?"USB":"Bluetooth/unknown",(int)start,
+        freshFrames,validPoses,trackedFrames,orientationFrames,positionFrames,(int)poseResult,
+        s.bIsOrientationValid?"true":"false",s.bIsPositionValid?"true":"false",s.bIsCurrentlyTracking?"true":"false",
+        firstSensor>=0 && lastSensor>firstSensor?"true":"false",s.RawTrackerData.ValidTrackerBitmask,(int)s.CrossButton);
+    write_all(json,std::strlen(json));
+    if(start==PSMResult_Success) api.PSM_StopControllerDataStream(id,1000);
+    api.PSM_FreeControllerListener(id);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // Preserve a binary output handle, then redirect SDK console logging to stderr.
     if (!DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_OUTPUT_HANDLE), GetCurrentProcess(), &frame_pipe, 0, FALSE, DUPLICATE_SAME_ACCESS)) return 2;
     SetStdHandle(STD_OUTPUT_HANDLE, GetStdHandle(STD_ERROR_HANDLE));
     _dup2(_fileno(stderr), _fileno(stdout));
-    int index = 0; bool list = false, synthetic = false;
+    int index = 0; bool list = false, synthetic = false, poseAudit = false;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--list")) { list = true; continue; }
         if (!std::strcmp(argv[i], "--synthetic")) { synthetic = true; continue; }
-        if (std::strcmp(argv[i], "--camera") || ++i == argc) { std::fprintf(stderr, "Use --camera index, --list, or --synthetic\n"); return 2; }
+        if (!std::strcmp(argv[i], "--pose-audit")) { poseAudit = true; continue; }
+        if (std::strcmp(argv[i], "--camera") || ++i == argc) { std::fprintf(stderr, "Use --camera index, --list, --pose-audit, or --synthetic\n"); return 2; }
         char* end = nullptr; long value = std::strtol(argv[i], &end, 10);
         if (end == argv[i] || *end || value < 0 || value >= PSMOVESERVICE_MAX_TRACKER_COUNT) return 2;
         index = static_cast<int>(value);
@@ -87,6 +152,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "Cannot connect to PSMoveServiceEx on 127.0.0.1:%s. Start its service first.\n", PSMOVESERVICE_DEFAULT_PORT);
         api.PSM_Shutdown(); return 3;
     }
+    if (poseAudit) { int result=audit_pose(api); api.PSM_Shutdown(); CloseHandle(frame_pipe); return result; }
     PSMTrackerList trackers = {};
     if (api.PSM_GetTrackerList(&trackers, 2000) != PSMResult_Success) {
         std::fprintf(stderr, "PSMoveServiceEx tracker discovery failed\n"); api.PSM_Shutdown(); return 4;

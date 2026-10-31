@@ -12,10 +12,33 @@ static class Program
     {
         int directoryIndex = Array.IndexOf(args, "--service-dir");
         string serviceDirectory = directoryIndex >= 0 && directoryIndex + 1 < args.Length ? args[directoryIndex + 1] : FindServiceDirectory();
+        if (args.Contains("--pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode = PoseProbe(); return; }
         if (args.Contains("--probe")) { Environment.ExitCode = LiveProbe(serviceDirectory).GetAwaiter().GetResult(); return; }
         if (args.Contains("--self-test")) { Environment.ExitCode = SelfTest().GetAwaiter().GetResult(); return; }
         ApplicationConfiguration.Initialize();
         Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory, args.Contains("--start")));
+    }
+    static int PoseProbe()
+    {
+        using var motion = new ControllerMotion();
+        MotionSnapshot snapshot = default;
+        for (int i=0; i<250; i++) {
+            snapshot = motion.Attitude.Snapshot(Stopwatch.GetTimestamp(),Stopwatch.Frequency);
+            if (snapshot.Samples>=100) break;
+            Thread.Sleep(20);
+        }
+        using var viewport = new PoseViewport { Size = new Size(1100,720), Orientation = snapshot.Orientation, Tracking = snapshot.Fresh,
+            SourceText = snapshot.Fresh ? "Live USB/DSU IMU attitude · gravity-aided tilt · relative yaw" : "No motion telemetry: enable DS4Windows UDP 127.0.0.1:26760" };
+        viewport.CreateControl();
+        using var bitmap = new Bitmap(viewport.Width,viewport.Height);
+        viewport.DrawToBitmap(bitmap,viewport.ClientRectangle);
+        bitmap.Save(Path.Combine(AppContext.BaseDirectory,"pose-probe.png"),ImageFormat.Png);
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"pose-probe.json"),System.Text.Json.JsonSerializer.Serialize(new {
+            snapshot.Samples,snapshot.Fresh,snapshot.Connection,
+            Quaternion = new { snapshot.Orientation.X,snapshot.Orientation.Y,snapshot.Orientation.Z,snapshot.Orientation.W },
+            AbsolutePositionTracked=false, YawOpticallyAnchored=false, motion.Error
+        },new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
+        return snapshot.Fresh ? 0 : 1;
     }
     static string FindServiceDirectory()
     {
@@ -102,6 +125,9 @@ static class Program
 
 sealed class Preview : Form
 {
+    readonly ControllerMotion motion = new();
+    readonly PoseViewport pose = new() { Dock = DockStyle.Fill };
+    readonly Label attitudeStatus = new() { AutoSize = true };
     readonly PictureBox picture = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
     readonly Label status = new() { AutoSize = true, Text = "Start capture to inspect the PS Eye. No mouse input is injected." };
     readonly NumericUpDown camera = new() { Minimum = 0, Maximum = 7, Value = 0, Width = 60 };
@@ -122,7 +148,7 @@ sealed class Preview : Form
     {
         this.synthetic = synthetic;
         serviceFolder.Text = serviceDirectory;
-        Text = "PSMoveServiceEx PS Eye diagnostic — no mouse output"; Width = 850; Height = 650;
+        Text = "Controller calibration — 3D pose and PS Eye tracking"; Width = 1250; Height = 850;
         var bar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
         var start = new Button { Text = "Start / Apply", AutoSize = true };
         start.Click += async (_, _) => { start.Enabled = false; await StopCapture(); StartCapture(); start.Enabled = true; };
@@ -132,16 +158,30 @@ sealed class Preview : Form
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { Description = "Select PSMoveServiceEx's working directory (containing shared_mem)", SelectedPath = serviceFolder.Text }; if (dialog.ShowDialog(this) == DialogResult.OK) serviceFolder.Text = dialog.SelectedPath; };
         bar.Controls.AddRange([new Label { Text = "Service tracker index", AutoSize = true },camera,start,halt,
             browse,serviceFolder,new Label { Text = "Configure exposure, gain and frame rate in PSMoveServiceEx Config Tool.", AutoSize = true },status]);
-        Controls.Add(picture); Controls.Add(bar);
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        var poseTab = new TabPage("1 · Controller in 3D");
+        var cameraTab = new TabPage("Camera tracking");
+        var poseTools = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
+        var forward = new Button { Text = "Set forward", AutoSize = true };
+        forward.Click += (_,_) => motion.Attitude.SetForward();
+        var bias = new Button { Text = "Measure gyro bias (keep still)", AutoSize = true };
+        bias.Click += (_,_) => motion.Attitude.BeginBiasCalibration();
+        var resetView = new Button { Text = "Reset view", AutoSize = true };
+        resetView.Click += (_,_) => pose.ResetView();
+        poseTools.Controls.AddRange([forward,bias,resetView,attitudeStatus]);
+        poseTab.Controls.Add(pose); poseTab.Controls.Add(poseTools);
+        cameraTab.Controls.Add(picture);
+        tabs.TabPages.AddRange([poseTab,cameraTab]);
+        Controls.Add(tabs); Controls.Add(bar);
         timer.Tick += (_, _) => RefreshPreview(); timer.Start();
         if (autoStart) Shown += (_, _) => StartCapture();
         FormClosing += (_, _) => { stop?.Cancel(); KillHelper(); };
-        FormClosed += (_, _) => { timer.Dispose(); picture.Image?.Dispose(); };
+        FormClosed += (_, _) => { timer.Dispose(); picture.Image?.Dispose(); motion.Dispose(); };
     }
     void StartCapture()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "pseye-capture.exe");
-        if (!File.Exists(path)) { status.Text = "Build/copy pseye-capture.exe and libusb-1.0.dll beside this app first."; return; }
+        if (!File.Exists(path)) { status.Text = "Build/copy pseye-capture.exe and PSMoveClient_CAPI.dll beside this app first."; return; }
         var info = new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         if (!Directory.Exists(serviceFolder.Text)) { status.Text = "Select PSMoveServiceEx's working directory (containing shared_mem)."; return; }
         info.WorkingDirectory = Path.GetFullPath(serviceFolder.Text);
@@ -214,5 +254,12 @@ sealed class Preview : Form
             }
         }
         if (bitmap != null) { var old = picture.Image; picture.Image = bitmap; old?.Dispose(); }
+        var attitude = motion.Attitude.Snapshot(Stopwatch.GetTimestamp(),Stopwatch.Frequency);
+        pose.Orientation = attitude.Orientation; pose.Tracking = attitude.Fresh;
+        string connection = attitude.Connection == 1 ? "USB wired" : attitude.Connection == 2 ? "Bluetooth (not validated)" : "unknown connection";
+        pose.SourceText = attitude.Fresh ? $"Live {connection} IMU attitude · gravity-aided tilt · relative yaw\nOptical orientation fusion and absolute 3D position are not connected yet." :
+            "Motion unavailable / stale. Enable DS4Windows UDP server at 127.0.0.1:26760; controller slot 1.";
+        attitudeStatus.Text = attitude.Calibration;
+        pose.Invalidate();
     }
 }
