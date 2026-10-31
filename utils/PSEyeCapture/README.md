@@ -8,7 +8,9 @@ The diagnostic only previews video and detects the purple DS4 bar. It does not i
 
 1. Install/configure [PSMoveServiceEx](https://github.com/Timocop/PSMoveServiceEx/releases/tag/v0.27.8). Its [PS Eye guide](https://github.com/Timocop/PSMoveServiceEx/wiki/Setting-up-the-PlayStation-3-Eye-Camera) uses **Virtual Device Manager → Service Management → Install PlayStation Eye Drivers** for camera drivers. The video interface is `USB\VID_1415&PID_2000&MI_00`; retain the camera's audio interface. This tool installs no drivers.
 2. Run `PSMoveService.exe`. Verify the PS Eye in `PSMoveConfigTool.exe`. Select 640×480 and request at least 60 fps. Configure exposure/gain and calibrate the color there. Stop this diagnostic before changing the camera's video mode.
-3. Run `PSEyeCapture.exe` from its package folder. Select the service tracker-list index, then **Start / Apply**. Stop closes the helper. A three-second stall terminates it; retry explicitly after fixing the service/device.
+3. Run `PSEyeCapture.exe` from its package folder. Select the service tracker-list index and **Service folder** (the service's working directory containing `shared_mem`), then **Start / Apply**. When one accessible running service is found, its executable folder is suggested automatically. Stop closes the helper. A three-second stall terminates it; retry explicitly after fixing the service/device.
+
+PSMoveServiceEx v0.27.8 compiles its Boost shared-memory directory as the relative path `shared_mem`. The SDK helper **must run with the same working directory as the service**; a network connection alone is insufficient. Use the Service folder field, or pass `--service-dir "C:\path\to\PSMoveService"`. SDK DLL loading remains restricted to the helper's own directory.
 
 The preview displays delivered FPS, age since SDK-frame dequeue, normalized target coordinates and a green target circle. FPS is measured at the pipe consumer; timestamps are Windows QPC **after SDK video polling**, not camera exposure timestamps. Neither measures optical-to-mouse latency. The preview renders at approximately 30 Hz and allocates bitmaps for diagnostics.
 
@@ -17,6 +19,8 @@ The helper follows the SDK lifecycle: `PSM_Initialize`, `PSM_GetTrackerList`, `P
 `pseye-capture.exe --list` queries the real service and reports trackers to stderr (exit 4 for none). The service endpoint is fixed to loopback port 9512 because SDK video uses local shared memory. No camera or DS4 devices are opened directly by this adapter.
 
 `PSEyeCapture.exe --synthetic` previews a simulated purple rectangle after Start. `PSEyeCapture.exe --self-test` consumes eight synthetic native frames headlessly, writes `self-test.txt` and exits with 0 on success. These modes do not connect to the service or access a camera, and do not prove that hardware capture works.
+
+`PSEyeCapture.exe --probe --service-dir "C:\path\to\PSMoveService"` captures 120 real frames without injecting input. It writes `camera-probe.json` (frame count, delivered rate, target count), `camera-probe.log` and `camera-probe.bmp` locally beside the executable. The image can contain the camera's surroundings; it is not uploaded by this tool.
 
 ## Build on Windows x64
 
@@ -40,6 +44,10 @@ The private child pipe has a 32-byte little-endian header: magic `0x31455950`, v
 
 ## Local validation (2026-10-31)
 
-The real SDK connected to the running PSMoveServiceEx v0.27.8 service over TCP and UDP and retrieved an empty tracker list. Video interface 0 has no driver on this computer. Installing the service's camera drivers and validating real video/detection remain required. Synthetic tests and the DS4Windows regression suite are software validation only.
+The PSMoveServiceEx-bundled PS Eye video driver was installed with user approval (installer exit 0, Windows service `libusb0`, device ConfigFlags 0). Audio retains `usbaudio`. The real SDK discovered one 640×480 PS Eye and successfully received shared-memory video after correcting the working-directory requirement.
+
+Measured 120-frame runs: requested 30 fps delivered 30.1 fps with a purple target in 120/120 frames; requested 60 delivered 58.5 fps with 120/120 detections; requested 75 delivered 67.2 fps with 106/120 detections. These short stationary tests do not establish moving-target reliability or end-to-end latency. The visible bar is near the bottom edge of the camera image and needs more tracking space for movement. The workspace service configuration currently requests 75 fps; camera intrinsics/extrinsics have not been calibrated.
+
+The DS4Windows x64 Release regression suite passed 7,205 tests (26 opt-in skips). The diagnostic has 29 synthetic component checks and the eight-frame synthetic pipe check. Cursor output and profile integration are not hardware-validated or implemented in this stage.
 
 Profile integration is the next stage: reuse `Mouse` activation, `MouseCursor`/`Global.outputKBMHandler`, serialization and callback-retirement rules. The capture callback must not inject input; camera creation must be opt-in and profile/controller changes must retire old samples.

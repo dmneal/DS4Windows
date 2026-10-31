@@ -50,7 +50,7 @@ The repository's CI uses .NET 8 and x64 Release tests:
 dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64
 ```
 
-Local validation: DS4Windows x64 Release suite passed 7,205 tests with 26 opt-in tests skipped; 29 isolated optical checks and an eight-frame synthetic adapter-pipe test passed. The real SDK connected to a running PSMoveServiceEx instance and returned zero trackers. The PS Eye video interface has no driver; live camera, tracking and cursor behavior remain unvalidated. The separate workspace companion's tests do not validate DS4Windows integration.
+Local validation: DS4Windows x64 Release suite passed 7,205 tests with 26 opt-in tests skipped; 29 isolated optical checks and an eight-frame synthetic adapter-pipe test passed. After approved installation of the service's PS Eye video driver, the SDK discovered one PS Eye and delivered 120 live VGA frames. At requested 75 fps the diagnostic measured 67.2 delivered fps and detected a purple target in 106/120 frames. At requested 60 fps it measured 58.5 fps with 120/120 detections. The SDK helper must share the service working directory for its relative `shared_mem` path. Moving-target behavior, calibration and cursor integration remain unvalidated. The separate workspace companion's tests do not validate DS4Windows integration.
 
 ## Maintainer decisions needed before implementation
 
