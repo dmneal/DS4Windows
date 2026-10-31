@@ -2,6 +2,8 @@
 
 Status: initial diagnostic implementation is in `utils/PSEyeCapture`; hardware validation and profile integration are pending. Per the user's selected architecture, **PSMoveServiceEx owns PS Eye access and camera configuration**.
 
+The product target has since been refined: camera at the TV base, normal two-handed DS4 grip, and calibrated camera/IMU pointing from multiple user positions. The current implementation plan is [TV pointing calibration](tv-pointing-calibration-plan.md). The image-coordinate pointer described below is an intermediate diagnostic, not the final multi-position pointing model.
+
 ## Problem and initial behavior
 
 A user with a DualShock 4 and a PS3 Eye should be able to select an optional profile mode that maps the observed light-bar position to the Windows pointer. The existing controller connection, button mappings, and hold/toggle activation should continue to own those responsibilities. Camera capture must remain disabled for existing profiles unless explicitly selected.
