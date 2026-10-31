@@ -11,5 +11,6 @@
     <Compile Include="../PSEyeCapture/ControllerMotion.cs" Link="ControllerMotion.cs" />
     <Compile Include="../PSEyeCapture/PoseGeometry.cs" Link="PoseGeometry.cs" />
     <Compile Include="../PSEyeCapture/ServicePose.cs" Link="ServicePose.cs" />
+    <Compile Include="../PSEyeCapture/TvCalibration.cs" Link="TvCalibration.cs" />
   </ItemGroup>
 </Project>

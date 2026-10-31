@@ -117,3 +117,26 @@ Check(native.Fresh && !(native with {Received=System.Diagnostics.Stopwatch.GetTi
 Throws<InvalidDataException>(()=>ServicePoseSample.Parse(nativeJson.Replace("[0,0,0,1]","[0,0,0,0]")),"zero quaternion rejected");
 Throws<InvalidDataException>(()=>ServicePoseSample.Parse(nativeJson.Replace("[0.1,-0.2,0.7]","[0.1]")),"malformed native position rejected");
 Console.WriteLine($"PASS: {checks} total tracking, attitude, transport and 3D geometry checks");
+var (tvw,tvh)=TvCalibration.Dimensions(55,16,9);
+Check(Math.Abs(Math.Sqrt(tvw*tvw+tvh*tvh)-55*.0254)<1e-6,"TV diagonal converted to physical meters");
+var truth=new TvModel(tvw,tvh,new(.03f,.36f,-.04f),Quaternion.CreateFromYawPitchRoll(.10f,-.03f,.02f),Vector3.Normalize(new(.10f,.08f,-1)));
+Quaternion AimAt(Vector3 from,Vector2 uv,float roll=0) {
+    var d=Vector3.Normalize(truth.TargetPoint(uv)-from); var a=truth.LocalAim;
+    var cross=Vector3.Cross(a,d); var q=Quaternion.Normalize(new Quaternion(cross,1+Vector3.Dot(a,d)));
+    return Quaternion.Normalize(Quaternion.CreateFromAxisAngle(d,roll)*q);
+}
+var observations=new List<AimMeasurement>();
+Vector3[] stations=[new(0,0,2),new(-.4f,.1f,1.8f),new(.4f,-.1f,2.3f)];
+Vector2[] targets=[new(.08f,.08f),new(.92f,.08f),new(.92f,.92f),new(.08f,.92f)];
+for(int station=0;station<3;station++) foreach(var uv in targets) observations.Add(new(stations[station],AimAt(stations[station],uv,.04f*station),uv,station));
+var fitted=TvCalibration.Fit(tvw,tvh,observations);
+Check(observations.Max(s=>TvCalibration.Error(fitted,s))<.002,"joint screen-plane and pointing-axis fit recovers synthetic aims");
+var unseen=new AimMeasurement(new(.2f,.15f,1.6f),AimAt(new(.2f,.15f,1.6f),new(.36f,.62f)),new(.36f,.62f),3);
+Check(TvCalibration.Error(fitted,unseen)<.003,"calibration generalizes to held-out position and interior target");
+Throws<ArgumentException>(()=>TvCalibration.Fit(tvw,tvh,observations.Take(8).ToArray()),"insufficient calibration coverage rejected");
+Throws<ArgumentException>(()=>TvCalibration.Fit(tvw,tvh,observations.Select(s=>s with {Position=Vector3.UnitZ}).ToArray()),"rotation-only calibration rejected");
+var flat=new TvModel(1,1,Vector3.Zero,Quaternion.Identity,-Vector3.UnitZ);
+Check(flat.Project(new(0,0,1),Quaternion.Identity)==new Vector2(.5f,.5f),"forward ray intersects center");
+Check(flat.Project(new(0,0,-1),Quaternion.Identity)==null,"intersection behind ray rejected");
+Check(flat.Project(new(0,0,1),Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI/2))==null,"parallel ray rejected");
+Console.WriteLine($"PASS: {checks} total checks including TV calibration and held-out geometry");

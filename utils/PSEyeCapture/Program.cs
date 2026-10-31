@@ -12,12 +12,13 @@ static class Program
     {
         int directoryIndex = Array.IndexOf(args, "--service-dir");
         string serviceDirectory = directoryIndex >= 0 && directoryIndex + 1 < args.Length ? args[directoryIndex + 1] : FindServiceDirectory();
+        if(args.Contains("--stationary-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode=NativePoseProbe(serviceDirectory,true); return; }
         if(args.Contains("--native-pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode=NativePoseProbe(serviceDirectory); return; }
         if (args.Contains("--pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode = PoseProbe(); return; }
         if (args.Contains("--probe")) { Environment.ExitCode = LiveProbe(serviceDirectory).GetAwaiter().GetResult(); return; }
         if (args.Contains("--self-test")) { Environment.ExitCode = SelfTest().GetAwaiter().GetResult(); return; }
         ApplicationConfiguration.Initialize();
-        Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory, args.Contains("--start")));
+        Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory, !args.Contains("--no-start")));
     }
     static int PoseProbe()
     {
@@ -41,18 +42,21 @@ static class Program
         },new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
         return snapshot.Fresh ? 0 : 1;
     }
-    static int NativePoseProbe(string directory)
+    static int NativePoseProbe(string directory,bool stationaryCheck=false)
     {
         using var source=new ServicePose(); source.Start(directory);
         var samples=new List<ServicePoseSample>(); int? sequence=null;
         var started=Stopwatch.StartNew();
-        while(started.Elapsed.TotalSeconds<8 && samples.Count<180) {
+        while(started.Elapsed.TotalSeconds<(stationaryCheck?10:8) && samples.Count<(stationaryCheck?int.MaxValue:180)) {
             var s=source.Sample;
             if(s is not null && s.Sequence!=sequence) { samples.Add(s); sequence=s.Sequence; }
             Thread.Sleep(5);
         }
         var last=samples.LastOrDefault();
         bool accepted=last is {Fresh:true,OrientationValid:true,PositionValid:true};
+        var center=samples.Count==0?System.Numerics.Vector3.Zero:samples.Aggregate(System.Numerics.Vector3.Zero,(sum,s)=>sum+s.Position)/samples.Count;
+        double positionRms=samples.Count==0?0:Math.Sqrt(samples.Average(s=>System.Numerics.Vector3.DistanceSquared(s.Position,center)))*1000;
+        double rotation=samples.Count<2?0:2*Math.Acos(Math.Clamp(Math.Abs(System.Numerics.Quaternion.Dot(samples[0].Orientation,samples[^1].Orientation)),0,1))*180/Math.PI;
         using var view=new PoseViewport {Size=new Size(1200,800)};
         if(last is not null) {
             view.Orientation=last.Orientation; view.Position=last.Position; view.NativeLightBarOrigin=true;
@@ -62,9 +66,9 @@ static class Program
         } else view.SourceText=source.Status;
         view.CreateControl(); using var bitmap=new Bitmap(view.Width,view.Height);
         view.DrawToBitmap(bitmap,view.ClientRectangle); bitmap.Save(Path.Combine(AppContext.BaseDirectory,"native-pose-probe.png"),ImageFormat.Png);
-        var report=new {Samples=samples.Count,ValidPoses=samples.Count(s=>s.OrientationValid && s.PositionValid),OpticalSamples=samples.Count(s=>s.Optical),
-            FreshAtCapture=accepted, Last=last,SourceStatus=source.Status};
-        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"native-pose-probe.json"),System.Text.Json.JsonSerializer.Serialize(report,new System.Text.Json.JsonSerializerOptions {WriteIndented=true,IncludeFields=true}));
+        var report=new {Samples=samples.Count,ValidPoses=samples.Count(s=>s.OrientationValid && s.PositionValid),OpticalSamples=samples.Count(s=>s.Optical),OpticalOrientationSamples=samples.Count(s=>s.OpticalOrientationValid),
+            FreshAtCapture=accepted, PositionRmsMm=positionRms,EndToEndRotationDegrees=rotation,Last=last,SourceStatus=source.Status,Recording=stationaryCheck?samples:null};
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,stationaryCheck?"stationary-pose-check.json":"native-pose-probe.json"),System.Text.Json.JsonSerializer.Serialize(report,new System.Text.Json.JsonSerializerOptions {WriteIndented=true,IncludeFields=true}));
         return accepted?0:1;
     }
     static string FindServiceDirectory()
@@ -154,6 +158,12 @@ sealed class Preview : Form
 {
     readonly ServicePose nativePose = new();
     readonly CheckBox diagnosticMotion = new() { Text="Diagnostic DSU attitude only", AutoSize=true };
+    readonly NumericUpDown displaySmoothing=new() {Minimum=0,Maximum=150,Value=35,Increment=5,Width=65};
+    readonly List<ServicePoseSample> stationary=[];
+    long stationaryStart,displayTime;
+    int? displaySequence;
+    bool measuring;
+    readonly Label qualityStatus=new() {AutoSize=true,Text="Stationary check: hold controller still for 10 seconds."};
     readonly ControllerMotion motion = new();
     readonly PoseViewport pose = new() { Dock = DockStyle.Fill };
     readonly Label attitudeStatus = new() { AutoSize = true };
@@ -200,9 +210,13 @@ sealed class Preview : Form
         forward.Enabled=bias.Enabled=false;
         diagnosticMotion.CheckedChanged += (_,_) => { forward.Enabled=bias.Enabled=diagnosticMotion.Checked; pose.ResetView(); };
         poseTools.Controls.AddRange([diagnosticMotion,forward,bias,resetView,attitudeStatus]);
+        var measure=new Button {Text="Measure stationary drift / jitter (10 s)",AutoSize=true};
+        measure.Click+=(_,_)=> {stationary.Clear(); stationaryStart=Stopwatch.GetTimestamp(); measuring=true;};
+        poseTools.Controls.AddRange([new Label {Text="Display smoothing ms (raw pose used for calibration)",AutoSize=true},displaySmoothing,measure,qualityStatus]);
         poseTab.Controls.Add(pose); poseTab.Controls.Add(poseTools);
         cameraTab.Controls.Add(picture);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
+        var tvTab=new TabPage("TV calibration"); tvTab.Controls.Add(new TvCalibrationPanel(nativePose)); tabs.TabPages.Add(tvTab);
         var fusionTab=new TabPage("Fusion / tuning");
         var tuning=new TextBox { Dock=DockStyle.Fill,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Both,WordWrap=false,Font=new Font("Consolas",10) };
         var tuningTools=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true };
@@ -312,12 +326,34 @@ sealed class Preview : Form
             bool fresh=sample?.Fresh==true;
             pose.Tracking=fresh && sample!.OrientationValid;
             pose.PositionTracked=fresh && sample!.PositionValid;
-            if(pose.Tracking) pose.Orientation=sample!.Orientation;
-            if(pose.PositionTracked) pose.Position=sample!.Position;
+            if(sample is not null && displaySequence!=sample.Sequence) {
+                float alpha=displaySmoothing.Value==0 || displayTime==0 || !fresh?1:1-MathF.Exp(-(float)Stopwatch.GetElapsedTime(displayTime).TotalMilliseconds/(float)displaySmoothing.Value);
+                if(pose.Tracking) pose.Orientation=System.Numerics.Quaternion.Slerp(pose.Orientation,sample.Orientation,alpha);
+                if(pose.PositionTracked) pose.Position=System.Numerics.Vector3.Lerp(pose.Position,sample.Position,alpha);
+                displayTime=Stopwatch.GetTimestamp(); displaySequence=sample.Sequence;
+            }
             pose.SourceText=sample is null?nativePose.Status:
-                $"PSMoveServiceEx native fusion · DS4 {sample.ControllerId} · sequence {sample.Sequence} · received {Stopwatch.GetElapsedTime(sample.Received).TotalMilliseconds:F0} ms ago\nOrientation: {(fresh && sample.OrientationValid?"valid":"stale / invalid")} · position: {(fresh && sample.PositionValid?"valid":"stale / invalid")} · optical: {(fresh && sample.Optical?"visible":"LOST")} · tracker mask {sample.TrackerMask}";
+                $"PSMoveServiceEx native fusion · DS4 {sample.ControllerId} · sequence {sample.Sequence} · received {Stopwatch.GetElapsedTime(sample.Received).TotalMilliseconds:F0} ms ago\nOrientation: {(fresh && sample.OrientationValid?"valid":"stale / invalid")} · position: {(fresh && sample.PositionValid?"valid":"stale / invalid")} · optical position: {(fresh && sample.Optical?"visible":"LOST")} · optical orientation: {(fresh && sample.OpticalOrientationValid?"accepted":"REJECTED / no absolute correction")}";
+            if(measuring) {
+                if(sample is {Fresh:true} && (stationary.Count==0 || stationary[^1].Sequence!=sample.Sequence)) stationary.Add(sample);
+                double elapsed=Stopwatch.GetElapsedTime(stationaryStart).TotalSeconds;
+                qualityStatus.Text=$"Keep still: {Math.Min(elapsed,10):F1}/10 s · {stationary.Count} samples";
+                if(elapsed>=10) {
+                    measuring=false;
+                    if(stationary.Count<50 || stationary.Any(s=>!s.PositionValid || !s.OrientationValid)) qualityStatus.Text="Insufficient valid data; expose the bar and repeat.";
+                    else {
+                        var center=stationary.Aggregate(System.Numerics.Vector3.Zero,(sum,s)=>sum+s.Position)/stationary.Count;
+                        double jitter=Math.Sqrt(stationary.Average(s=>System.Numerics.Vector3.DistanceSquared(s.Position,center)))*1000;
+                        double rotation=2*Math.Acos(Math.Clamp(Math.Abs(System.Numerics.Quaternion.Dot(stationary[0].Orientation,stationary[^1].Orientation)),0,1))*180/Math.PI;
+                        double fraction=stationary.Count(s=>s.OpticalOrientationValid)/(double)stationary.Count;
+                        qualityStatus.Text=$"Raw pose: {jitter:F1} mm position RMS · {rotation:F2}° end-to-end rotation · optical orientation {fraction:P0}. Physical motion affects this test.";
+                        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"stationary-pose-check.json"),System.Text.Json.JsonSerializer.Serialize(new {PositionRmsMm=jitter,EndToEndRotationDegrees=rotation,OpticalOrientationFraction=fraction,Samples=stationary},new System.Text.Json.JsonSerializerOptions {WriteIndented=true,IncludeFields=true}));
+                    }
+                }
+            }
             pose.PositionText=pose.PositionTracked?$"Service position (m): X {sample!.Position.X:F3}  Y {sample.Position.Y:F3}  Z {sample.Position.Z:F3} · {(sample.Optical?"optically corrected":"PREDICTED — optical lost")}":"Absolute position unavailable / stale — display anchor only";
             attitudeStatus.Text="Native fusion — tune/calibrate in Fusion / tuning";
+            pose.AccessibleName=pose.SourceText+" · "+pose.PositionText;
             pose.Invalidate(); return;
         }
         var attitude = motion.Attitude.Snapshot(Stopwatch.GetTimestamp(),Stopwatch.Frequency);

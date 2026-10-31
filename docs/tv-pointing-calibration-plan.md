@@ -1,6 +1,6 @@
 # TV pointing: controller, camera and multi-position calibration
 
-Status: implementation plan, not an implemented fusion or calibration feature.
+Status update 2026-10-31: native Bluetooth fusion and a first TV wizard/geometric solver are implemented. The user confirmed a 77-inch TV and native 3D motion. Stationary orientation remains unstable; see [measured experiments](fusion-stationary-experiments.md). Hardware TV calibration is not validated. USB fusion remains pending. The design below records the broader target and earlier assumptions.
 
 The [fused-pose audit](psmoveserviceex-fusion-audit.md) verifies existing SDK getters and the measured wired-controller gap. Production fusion should reuse the service pipeline. The new gravity-aided 3D IMU preview is diagnostic only.
 

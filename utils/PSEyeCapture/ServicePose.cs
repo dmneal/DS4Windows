@@ -8,6 +8,9 @@ namespace PSEyeCapture;
 record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, bool PositionValid,
     bool Optical, uint TrackerMask, Vector3 Position, Quaternion Orientation, long Received)
 {
+    public bool CrossDown {get;init;}
+    public bool OpticalOrientationValid {get;init;}
+    public bool OpticalPositionValid {get;init;}
     public bool Fresh => Stopwatch.GetElapsedTime(Received).TotalMilliseconds < 250;
     public static ServicePoseSample Parse(string line)
     {
@@ -20,12 +23,16 @@ record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, 
         if(orientation.LengthSquared()<.5f || orientation.LengthSquared()>1.5f) throw new InvalidDataException("Invalid quaternion norm");
         return new(r.GetProperty("Sequence").GetInt32(),r.GetProperty("ControllerId").GetInt32(),
             r.GetProperty("OrientationValid").GetBoolean(),r.GetProperty("PositionValid").GetBoolean(),
-            r.GetProperty("Optical").GetBoolean(),r.GetProperty("TrackerMask").GetUInt32(),new(p[0],p[1],p[2]),Quaternion.Normalize(orientation),Stopwatch.GetTimestamp());
+            r.GetProperty("Optical").GetBoolean(),r.GetProperty("TrackerMask").GetUInt32(),new(p[0],p[1],p[2]),Quaternion.Normalize(orientation),Stopwatch.GetTimestamp()) {
+                CrossDown=r.TryGetProperty("CrossDown",out var cross) && cross.GetBoolean(),
+                OpticalOrientationValid=r.TryGetProperty("OpticalOrientationValid",out var oo) && oo.GetBoolean(),
+                OpticalPositionValid=r.TryGetProperty("OpticalPositionValid",out var op) && op.GetBoolean() };
     }
 }
 
 sealed class ServicePose : IDisposable
 {
+    public string Directory {get;private set;}=Environment.CurrentDirectory;
     public ServicePoseSample? Sample => Volatile.Read(ref sample);
     public string Status => Volatile.Read(ref status);
     ServicePoseSample? sample;
@@ -34,6 +41,7 @@ sealed class ServicePose : IDisposable
     CancellationTokenSource? cancellation;
     public void Start(string directory)
     {
+        Directory=directory;
         Dispose(); sample=null; status="Connecting to PSMoveServiceEx…";
         cancellation=new(); var token=cancellation.Token;
         var info=new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory,"pseye-capture.exe")) {

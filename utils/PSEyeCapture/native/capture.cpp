@@ -98,11 +98,12 @@ static int audit_pose(Api& api, bool stream=false) {
                 lastSensor=s.CalibratedSensorData.TimeInSeconds;
                 if(firstSensor<0) firstSensor=lastSensor;
                 if(stream) {
-                    char line[1024];
-                    std::snprintf(line,sizeof(line),"{\"Sequence\":%d,\"ControllerId\":%d,\"OrientationValid\":%s,\"PositionValid\":%s,\"Optical\":%s,\"TrackerMask\":%u,\"Position\":[%.9g,%.9g,%.9g],\"Quaternion\":[%.9g,%.9g,%.9g,%.9g]}\n",
+                    char line[2048];
+                    std::snprintf(line,sizeof(line),"{\"Sequence\":%d,\"ControllerId\":%d,\"OrientationValid\":%s,\"PositionValid\":%s,\"Optical\":%s,\"TrackerMask\":%u,\"Position\":[%.9g,%.9g,%.9g],\"Quaternion\":[%.9g,%.9g,%.9g,%.9g],\"CrossDown\":%s,\"OpticalOrientationValid\":%s,\"OpticalPositionValid\":%s,\"HostSeconds\":%.9g,\"SensorSeconds\":%.9g,\"GyroRad\":[%.9g,%.9g,%.9g],\"AccelG\":[%.9g,%.9g,%.9g],\"RawGyro\":[%d,%d,%d],\"OpticalQuaternion\":[%.9g,%.9g,%.9g,%.9g],\"HardwareCalibration\":%s}\n",
                         c->OutputSequenceNum,id,s.bIsOrientationValid?"true":"false",s.bIsPositionValid?"true":"false",s.bIsCurrentlyTracking?"true":"false",s.RawTrackerData.ValidTrackerBitmask,
                         s.Pose.Position.x*.01,s.Pose.Position.y*.01,s.Pose.Position.z*.01,
-                        s.Pose.Orientation.x,s.Pose.Orientation.y,s.Pose.Orientation.z,s.Pose.Orientation.w);
+                        s.Pose.Orientation.x,s.Pose.Orientation.y,s.Pose.Orientation.z,s.Pose.Orientation.w,
+                        ((int)s.CrossButton&1)?"true":"false",s.RawTrackerData.bMulticamOrientationValid?"true":"false",s.RawTrackerData.bMulticamPositionValid?"true":"false", std::chrono::duration<double>(std::chrono::steady_clock::now()-begun).count(), s.CalibratedSensorData.TimeInSeconds, s.CalibratedSensorData.Gyroscope.x,s.CalibratedSensorData.Gyroscope.y,s.CalibratedSensorData.Gyroscope.z, s.CalibratedSensorData.Accelerometer.x,s.CalibratedSensorData.Accelerometer.y,s.CalibratedSensorData.Accelerometer.z, s.RawSensorData.Gyroscope.x,s.RawSensorData.Gyroscope.y,s.RawSensorData.Gyroscope.z, s.RawTrackerData.MulticamOrientation.x,s.RawTrackerData.MulticamOrientation.y,s.RawTrackerData.MulticamOrientation.z,s.RawTrackerData.MulticamOrientation.w,s.bHasValidHardwareCalibration?"true":"false");
                     if(!write_all(line,std::strlen(line))) break;
                 }
             }
