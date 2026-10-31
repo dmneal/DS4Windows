@@ -1,6 +1,6 @@
 # Draft proposal: optional PS Eye light-bar pointer
 
-Status: local design draft; no implementation or hardware validation yet.
+Status: initial diagnostic implementation is in `utils/PSEyeCapture`; hardware validation and profile integration are pending. Per the user's selected architecture, **PSMoveServiceEx owns PS Eye access and camera configuration**.
 
 ## Problem and initial behavior
 
@@ -10,9 +10,9 @@ The initial target is one DS4, one camera, and calibrated 2D cursor positioning.
 
 ## Capture research
 
-The most useful native reference is [opentrack's video-ps3eye module](https://github.com/opentrack/opentrack/tree/master/video-ps3eye), its capture subprocess and [PS3EYEDriver submodule](https://github.com/opentrack/PS3EYEDriver). The wrapper demonstrates enumeration, color capture, frame-rate selection and exposure/gain control. A small native helper with timestamped samples could keep capture stalls off controller-report threads. Its IPC and deployment need an independent design; do not assume opentrack's shared-memory layout is a stable public API.
+The selected backend is [PSMoveServiceEx](https://github.com/Timocop/PSMoveServiceEx), using its official v0.27.8 C client SDK. The diagnostic adapter discovers trackers, starts a tracker stream and reads SDK shared-memory BGR frames. Exposure, gain, FPS, camera drivers and camera calibration remain in PSMoveServiceEx Config Tool / Virtual Device Manager. DS4Windows retains its existing controller transport and input mapping. The adapter does not require PSMoveServiceEx to take ownership of the DS4 just to receive camera images.
 
-Other references are [PSMoveServiceEx](https://github.com/Timocop/PSMoveServiceEx) for a full tracking service, [psmoveapi](https://github.com/thp/psmoveapi) for future Move transport/tracking, and [PS3EyeDirectShow](https://github.com/jkevin/PS3EyeDirectShow) for webcam-style diagnostics. The dependency choice remains open pending maintainer feedback and a local capture test. Inspect source-level licenses and retain third-party notices before importing code.
+opentrack's capture code remains a research reference; a separate direct-driver dependency is not included. psmoveapi remains a reference for later Move support. Preserve SDK source/license notices when packaging.
 
 ## Proposed components
 
@@ -50,11 +50,11 @@ The repository's CI uses .NET 8 and x64 Release tests:
 dotnet test .\DS4WindowsTests\DS4WindowsTests.csproj -c Release -p:Platform=x64
 ```
 
-No upstream build or tests have been run for this documentation-only draft. The separate workspace companion's tests do not validate DS4Windows integration.
+Local validation: DS4Windows x64 Release suite passed 7,205 tests with 26 opt-in tests skipped; 29 isolated optical checks and an eight-frame synthetic adapter-pipe test passed. The real SDK connected to a running PSMoveServiceEx instance and returned zero trackers. The PS Eye video interface has no driver; live camera, tracking and cursor behavior remain unvalidated. The separate workspace companion's tests do not validate DS4Windows integration.
 
 ## Maintainer decisions needed before implementation
 
 1. Is optional external-camera pointing within the project's intended scope?
-2. Should capture be a native helper, an in-process library, or an adapter to a separately installed tracker?
+2. Is a helper consuming the separately installed PSMoveServiceEx SDK acceptable for the opt-in capture source?
 3. Where should per-camera calibration and per-controller target association live relative to profiles?
 4. Which supported mouse modes and activation semantics should define the first PR?

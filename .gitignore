@@ -336,4 +336,5 @@ ASALocalRun/
 
 # Local validation runs and generated test artifacts
 /isolated_results/
+/utils/PSEyeCapture/bin/
 

@@ -1,0 +1,35 @@
+name: PSMoveServiceEx camera diagnostics
+on:
+  pull_request:
+    paths:
+      - 'utils/PSEyeCapture/**'
+      - 'utils/PSEyeCapture.Tests/**'
+      - 'DS4Windows/DS4Control/OpticalTracking/**'
+      - '.github/workflows/pseye-diagnostics.yml'
+  push:
+    branches: ['codex/pseye-capture-diagnostics']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-pipeline:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Download pinned build dependencies
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .pseye-tools | Out-Null
+          Invoke-WebRequest https://ziglang.org/download/0.14.1/zig-x86_64-windows-0.14.1.zip -OutFile .pseye-tools/zig.zip
+          if ((Get-FileHash .pseye-tools/zig.zip -Algorithm SHA256).Hash -ne '554F5378228923FFD558EAC35E21AF020C73789D87AFEABF4BFD16F2E6FEED2C') { throw 'Zig checksum mismatch' }
+          Expand-Archive .pseye-tools/zig.zip .pseye-tools/zig
+          Invoke-WebRequest https://github.com/Timocop/PSMoveServiceEx/releases/download/v0.27.8/PSMoveClient_CAPI.zip -OutFile .pseye-tools/sdk.zip
+          if ((Get-FileHash .pseye-tools/sdk.zip -Algorithm SHA256).Hash -ne '95996E356B25EAFBDF7E43C13852AF299EB392CB169D71310110A43D62A006DC') { throw 'SDK checksum mismatch' }
+          Expand-Archive .pseye-tools/sdk.zip .pseye-tools/sdk
+      - name: Build and test synthetic adapter pipeline
+        shell: pwsh
+        run: |
+          .\utils\PSEyeCapture\build.ps1 -ZigExe "$PWD\.pseye-tools\zig\zig-x86_64-windows-0.14.1\zig.exe" -PsmSdkRoot "$PWD\.pseye-tools\sdk\PSMoveClient_CAPI"

@@ -1,0 +1,45 @@
+# PSMoveServiceEx PS Eye diagnostic
+
+Experimental first stage of optional camera-based pointing for DS4Windows. **PSMoveServiceEx owns camera discovery, USB access, exposure/gain/FPS and calibration.** This tool uses its actual C client SDK to receive local shared-memory video. It does not use a separate PS Eye driver implementation, pretend a custom JSON protocol is PSMoveServiceEx, or require SteamVR.
+
+The diagnostic only previews video and detects the purple DS4 bar. It does not inject mouse input or add a profile mode yet. The small tracking classes are compiled by the main application but no camera worker is created in DS4Windows. Existing controller transport and mappings remain with DS4Windows. Connecting the DS4 itself to PSMoveServiceEx is not required for camera-only acquisition.
+
+## Setup and run
+
+1. Install/configure [PSMoveServiceEx](https://github.com/Timocop/PSMoveServiceEx/releases/tag/v0.27.8). Its [PS Eye guide](https://github.com/Timocop/PSMoveServiceEx/wiki/Setting-up-the-PlayStation-3-Eye-Camera) uses **Virtual Device Manager → Service Management → Install PlayStation Eye Drivers** for camera drivers. The video interface is `USB\VID_1415&PID_2000&MI_00`; retain the camera's audio interface. This tool installs no drivers.
+2. Run `PSMoveService.exe`. Verify the PS Eye in `PSMoveConfigTool.exe`. Select 640×480 and request at least 60 fps. Configure exposure/gain and calibrate the color there. Stop this diagnostic before changing the camera's video mode.
+3. Run `PSEyeCapture.exe` from its package folder. Select the service tracker-list index, then **Start / Apply**. Stop closes the helper. A three-second stall terminates it; retry explicitly after fixing the service/device.
+
+The preview displays delivered FPS, age since SDK-frame dequeue, normalized target coordinates and a green target circle. FPS is measured at the pipe consumer; timestamps are Windows QPC **after SDK video polling**, not camera exposure timestamps. Neither measures optical-to-mouse latency. The preview renders at approximately 30 Hz and allocates bitmaps for diagnostics.
+
+The helper follows the SDK lifecycle: `PSM_Initialize`, `PSM_GetTrackerList`, `PSM_AllocateTrackerListener`, `PSM_StartTrackerDataStream`, `PSM_OpenTrackerVideoStream`, then `PSM_Update` / `PSM_PollTrackerVideoStream` / `PSM_GetTrackerVideoFrameBuffer`. Normal termination closes the stream, stops data, frees the listener and shuts down the client. Process termination relies on the service retiring the disconnected client. Startup/reads are off the UI and controller-report threads. SDK console logging is routed to stderr, keeping the binary frame channel separate.
+
+`pseye-capture.exe --list` queries the real service and reports trackers to stderr (exit 4 for none). The service endpoint is fixed to loopback port 9512 because SDK video uses local shared memory. No camera or DS4 devices are opened directly by this adapter.
+
+`PSEyeCapture.exe --synthetic` previews a simulated purple rectangle after Start. `PSEyeCapture.exe --self-test` consumes eight synthetic native frames headlessly, writes `self-test.txt` and exits with 0 on success. These modes do not connect to the service or access a camera, and do not prove that hardware capture works.
+
+## Build on Windows x64
+
+Requirements: .NET 8 SDK for Windows, official [Zig 0.14.1](https://ziglang.org/download/), and the extracted **PSMoveClient_CAPI.zip** from [PSMoveServiceEx v0.27.8](https://github.com/Timocop/PSMoveServiceEx/releases/tag/v0.27.8). `PsmSdkRoot` points at the extracted directory containing `include`, `bin`, and `LICENSE.txt`.
+
+```powershell
+.\utils\PSEyeCapture\build.ps1 -ZigExe C:\tools\zig\zig.exe -PsmSdkRoot C:\tools\PSMoveClient_CAPI
+```
+
+The script runs 29 synthetic component checks, builds the small SDK adapter, publishes the preview, copies the SDK DLL/license and runs the eight-frame native-pipe test. Output is `utils/PSEyeCapture/bin/package/`. No compiler, SDK or driver is downloaded automatically. The .NET projects have no NuGet dependencies and use an offline NuGet config. The SDK DLL is loaded only from beside the native helper. Tested SDK ZIP SHA-256: `95996e356b25eafbdf7e43c13852af299eb392cb169d71310110a43d62a006dc`.
+
+## Tracking and limits
+
+Color detection operates on PSMoveServiceEx's BGR video. Thresholds: HSV hue 250–350 degrees, saturation at least 0.30, brightness at least 90/255. Eight-connected components smaller than 15 pixels or larger than 20% of the image are rejected. Acquisition requires a single eligible component; subsequent frames use nearest-component association within normalized distance 0.20. This can still misidentify nearby purple objects and is not a physical-controller identity guarantee.
+
+`OpticalCalibration` provides a rectangular camera region, mirror, clamp and 150-ms freshness gate; the preview currently uses the whole frame. Invalid, future and stale samples do not project. Buffers are reused in detection. No 3D pose, sensor fusion, drift correction, PS Move transport, button mapping or screen-corner UI is implemented here.
+
+The adapter currently accepts only a PS Eye tracker reporting 640×480. Stop capture before reconfiguring the service. The public SDK returns a frame pointer with no payload length; this version requires the configured fixed VGA BGR mode and checks reported tracker width before reading it. Supporting other modes requires a dimension-aware SDK extension rather than guessing buffer lengths.
+
+The private child pipe has a 32-byte little-endian header: magic `0x31455950`, version `1`, width `640`, height `480`, stride `1920`, payload `921600` (six 32-bit integers), then a signed 64-bit QPC timestamp; packed BGR data follows. Managed code validates dimensions before reading the bounded payload. This pipe is internal to the adapter/preview and is not PSMoveServiceEx's network protocol.
+
+## Local validation (2026-10-31)
+
+The real SDK connected to the running PSMoveServiceEx v0.27.8 service over TCP and UDP and retrieved an empty tracker list. Video interface 0 has no driver on this computer. Installing the service's camera drivers and validating real video/detection remain required. Synthetic tests and the DS4Windows regression suite are software validation only.
+
+Profile integration is the next stage: reuse `Mouse` activation, `MouseCursor`/`Global.outputKBMHandler`, serialization and callback-retirement rules. The capture callback must not inject input; camera creation must be opt-in and profile/controller changes must retire old samples.
