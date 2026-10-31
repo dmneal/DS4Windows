@@ -12,6 +12,8 @@ The diagnostic only previews video and detects the purple DS4 bar. It does not i
 
 PSMoveServiceEx v0.27.8 compiles its Boost shared-memory directory as the relative path `shared_mem`. The SDK helper **must run with the same working directory as the service**; a network connection alone is insufficient. Use the Service folder field, or pass `--service-dir "C:\path\to\PSMoveService"`. SDK DLL loading remains restricted to the helper's own directory.
 
+Pass `--start` to open the live preview with capture already running. Without it, press Start / Apply in the window.
+
 The preview displays delivered FPS, age since SDK-frame dequeue, normalized target coordinates and a green target circle. FPS is measured at the pipe consumer; timestamps are Windows QPC **after SDK video polling**, not camera exposure timestamps. Neither measures optical-to-mouse latency. The preview renders at approximately 30 Hz and allocates bitmaps for diagnostics.
 
 The helper follows the SDK lifecycle: `PSM_Initialize`, `PSM_GetTrackerList`, `PSM_AllocateTrackerListener`, `PSM_StartTrackerDataStream`, `PSM_OpenTrackerVideoStream`, then `PSM_Update` / `PSM_PollTrackerVideoStream` / `PSM_GetTrackerVideoFrameBuffer`. Normal termination closes the stream, stops data, frees the listener and shuts down the client. Process termination relies on the service retiring the disconnected client. Startup/reads are off the UI and controller-report threads. SDK console logging is routed to stderr, keeping the binary frame channel separate.

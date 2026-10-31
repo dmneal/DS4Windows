@@ -15,7 +15,7 @@ static class Program
         if (args.Contains("--probe")) { Environment.ExitCode = LiveProbe(serviceDirectory).GetAwaiter().GetResult(); return; }
         if (args.Contains("--self-test")) { Environment.ExitCode = SelfTest().GetAwaiter().GetResult(); return; }
         ApplicationConfiguration.Initialize();
-        Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory));
+        Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory, args.Contains("--start")));
     }
     static string FindServiceDirectory()
     {
@@ -118,7 +118,7 @@ sealed class Preview : Form
     long latest, started, frames;
     bool dirty;
     readonly bool synthetic;
-    public Preview(bool synthetic, string serviceDirectory)
+    public Preview(bool synthetic, string serviceDirectory, bool autoStart = false)
     {
         this.synthetic = synthetic;
         serviceFolder.Text = serviceDirectory;
@@ -134,6 +134,7 @@ sealed class Preview : Form
             browse,serviceFolder,new Label { Text = "Configure exposure, gain and frame rate in PSMoveServiceEx Config Tool.", AutoSize = true },status]);
         Controls.Add(picture); Controls.Add(bar);
         timer.Tick += (_, _) => RefreshPreview(); timer.Start();
+        if (autoStart) Shown += (_, _) => StartCapture();
         FormClosing += (_, _) => { stop?.Cancel(); KillHelper(); };
         FormClosed += (_, _) => { timer.Dispose(); picture.Image?.Dispose(); };
     }
