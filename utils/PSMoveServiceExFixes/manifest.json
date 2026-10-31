@@ -1,0 +1,30 @@
+{
+  "BaseCommit": "308cb9ea55dc1ed32b2c0d60e63d73b1b3c5d9f1",
+  "Patches": [
+    {
+      "Directory": ".",
+      "File": "service-v0.27.8.patch",
+      "BaseCommit": "308cb9ea55dc1ed32b2c0d60e63d73b1b3c5d9f1"
+    },
+    {
+      "Directory": "thirdparty/protobuf",
+      "File": "protobuf-build.patch",
+      "BaseCommit": "c404c2a2e3e9a05096fc86f080b6d966b2b0043c"
+    },
+    {
+      "Directory": "thirdparty/imgui",
+      "File": "imgui-tabs.patch",
+      "BaseCommit": "0b10bec71ff7178bc16239bfc3e7604f5c457df0"
+    },
+    {
+      "Directory": "thirdparty/PS3EYEDriver",
+      "File": "pseye-frame-api.patch",
+      "BaseCommit": "c8d80a6f705c0a40887d60963991fc92c46530be"
+    },
+    {
+      "Directory": "thirdparty/libstem_gamepad",
+      "File": "gamepad-init.patch",
+      "BaseCommit": "d655d32413a8a4fc201476b888f5bb9c94e36d07"
+    }
+  ]
+}

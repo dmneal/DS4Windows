@@ -2,6 +2,7 @@
 # Set default behavior to automatically normalize line endings.
 ###############################################################################
 * text=auto
+utils/PSMoveServiceExFixes/*.patch -text -whitespace
 
 # Release artifact hashes include original document bytes. Do not normalize
 # upstream license or build-note line endings when staging or checking out.

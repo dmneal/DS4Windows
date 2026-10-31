@@ -53,6 +53,10 @@ record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, 
 
 sealed class ServicePose : IDisposable
 {
+    public static string ConfigurationDirectory(string serviceDirectory) {
+        string marker=Path.Combine(serviceDirectory,"configuration-path.txt");
+        return File.Exists(marker)?Path.GetFullPath(File.ReadAllText(marker).Trim()):Path.GetFullPath(Path.Combine(serviceDirectory,"..","..","data","PSMoveService"));
+    }
     public string Directory {get;private set;}=Environment.CurrentDirectory;
     public ServicePoseSample? Sample => Volatile.Read(ref sample);
     public string Status => Volatile.Read(ref status);

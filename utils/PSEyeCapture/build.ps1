@@ -2,6 +2,7 @@ param(
     [string]$DotnetExe = 'dotnet',
     [Parameter(Mandatory=$true)][string]$ZigExe,
     [Parameter(Mandatory=$true)][string]$PsmSdkRoot,
+    [string]$ClientDll,
     [string]$OutputDirectory = "$PSScriptRoot\bin\package"
 )
 $ErrorActionPreference='Stop'
@@ -11,7 +12,7 @@ $tests = "$PSScriptRoot\..\PSEyeCapture.Tests\PSEyeCapture.Tests.csproj"
 if ($LASTEXITCODE -ne 0) { throw 'Test restore failed' }
 & $DotnetExe run --project $tests --no-restore -c Release
 if ($LASTEXITCODE -ne 0) { throw 'Tracking tests failed' }
-& "$PSScriptRoot\build-native.ps1" -ZigExe $ZigExe -PsmSdkRoot $PsmSdkRoot -OutputDirectory "$PSScriptRoot\bin\native"
+& "$PSScriptRoot\build-native.ps1" -ZigExe $ZigExe -PsmSdkRoot $PsmSdkRoot -ClientDll $ClientDll -OutputDirectory "$PSScriptRoot\bin\native"
 & $DotnetExe restore "$PSScriptRoot\PSEyeCapture.csproj" --configfile $config
 if ($LASTEXITCODE -ne 0) { throw 'Diagnostic restore failed' }
 & $DotnetExe publish "$PSScriptRoot\PSEyeCapture.csproj" --no-restore -c Release -o $OutputDirectory

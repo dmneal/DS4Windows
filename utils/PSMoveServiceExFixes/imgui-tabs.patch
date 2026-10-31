@@ -1,0 +1,18 @@
+diff --git a/imgui.h b/imgui.h
+index cbe5b52..23b0fb3 100644
+--- a/imgui.h
++++ b/imgui.h
+@@ -1306,3 +1306,13 @@ struct ImFont
+ #ifdef IMGUI_INCLUDE_IMGUI_USER_H
+ #include "imgui_user.h"
+ #endif
++
++// PSMoveServiceEx selected-state tab helper, absent from its pinned dependency.
++namespace ImGui {
++inline bool ButtonChecked(const char* label, bool selected, const ImVec2& size = ImVec2(0, 0)) {
++    if (selected) PushStyleColor(ImGuiCol_Button, GetStyle().Colors[ImGuiCol_ButtonActive]);
++    const bool pressed = Button(label, size);
++    if (selected) PopStyleColor();
++    return pressed;
++}
++}

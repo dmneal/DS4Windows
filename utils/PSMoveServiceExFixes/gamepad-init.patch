@@ -1,0 +1,41 @@
+diff --git a/source/gamepad/Gamepad.h b/source/gamepad/Gamepad.h
+index b0883ee..9f2103d 100644
+--- a/source/gamepad/Gamepad.h
++++ b/source/gamepad/Gamepad.h
+@@ -71,7 +71,11 @@ struct Gamepad_device {
+    
+    This function must be called from the same thread that will be calling Gamepad_processEvents()
+    and Gamepad_detectDevices(). */
++#ifdef _WIN32
++void Gamepad_init(int xinput_only);
++#else
+ void Gamepad_init();
++#endif
+ 
+ /* Tears down all data structures created by the gamepad library and releases any memory that was
+    allocated. It is not necessary to call this function at application termination, but it's
+diff --git a/source/gamepad/Gamepad_windows_dinput.c b/source/gamepad/Gamepad_windows_dinput.c
+index de5f49e..de8123a 100644
+--- a/source/gamepad/Gamepad_windows_dinput.c
++++ b/source/gamepad/Gamepad_windows_dinput.c
+@@ -112,7 +112,10 @@ static LPDIRECTINPUT directInputInterface;
+ static bool inited = false;
+ static bool xInputAvailable;
+ 
+-void Gamepad_init() {
++// Modified for PSMoveServiceEx's XInput-only initialization option.
++static int xInputOnly = 0;
++void Gamepad_init(int xinput_only) {
++    xInputOnly = xinput_only;
+ 	if (!inited) {
+ 		HRESULT result;
+ 		HMODULE module;
+@@ -771,7 +774,7 @@ void Gamepad_detectDevices() {
+ 		return;
+ 	}
+ 	
+-	result = IDirectInput_EnumDevices(directInputInterface, DI8DEVCLASS_GAMECTRL, enumDevicesCallback, NULL, DIEDFL_ALLDEVICES);
++	result = xInputOnly ? DI_OK : IDirectInput_EnumDevices(directInputInterface, DI8DEVCLASS_GAMECTRL, enumDevicesCallback, NULL, DIEDFL_ALLDEVICES);
+ 	if (result != DI_OK) {
+ 		fprintf(stderr, "Warning: IDirectInput_EnumDevices returned 0x%X\n", (unsigned int) result);
+ 	}

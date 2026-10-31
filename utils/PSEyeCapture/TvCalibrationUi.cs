@@ -125,7 +125,7 @@ sealed class TvTargetWindow : Form
     {
         string folder=Path.Combine(AppContext.BaseDirectory,"calibration"); Directory.CreateDirectory(folder);
         string path=Path.Combine(folder,$"tv-session-{DateTime.Now:yyyyMMdd-HHmmss}.json");
-        string config=Path.GetFullPath(Path.Combine(source.Directory,"..","..","data","PSMoveService"));
+        string config=ServicePose.ConfigurationDirectory(source.Directory);
         var fingerprints=Directory.Exists(config)?Directory.GetFiles(config,"*.json").Where(f=>!f.Contains("before") && (Path.GetFileName(f).StartsWith("PS3EyeTrackerConfig_") || Path.GetFileName(f).StartsWith("dualshock4_")))
             .ToDictionary(f=>Path.GetFileName(f)!,f=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f)))):new Dictionary<string,string>();
         var payload=new {Version=1,Validated=accepted,CreatedUtc=DateTime.UtcNow,Display=display,PixelBounds=Bounds,

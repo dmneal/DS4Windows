@@ -1,0 +1,789 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c4d9b2b..414912a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -15,6 +15,11 @@ set(PSM_RELEASE_INSTALL_PATH "${PSM_ROOT_INSTALL_PATH}/${ARCH_LABEL}/Release")
+ file(MAKE_DIRECTORY "${PSM_ROOT_INSTALL_PATH}")
+ file(WRITE "${PSM_ROOT_INSTALL_PATH}/version.txt" "${PSM_PROJECT_NAME}")
+ 
++if(OpenCV_DIR)
++    find_package(OpenCV REQUIRED)
++    add_custom_target(opencv)
++    add_definitions(-DHAS_OPENCV)
++endif()
+ include(cmake/ThirdParty.cmake)
+ include(cmake/Installer.cmake)
+ 
+diff --git a/cmake/ThirdParty.cmake b/cmake/ThirdParty.cmake
+index d6b1a4f..85c56c3 100644
+--- a/cmake/ThirdParty.cmake
++++ b/cmake/ThirdParty.cmake
+@@ -24,7 +24,7 @@ ELSEIF(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+     #hid required for HidD_SetOutputReport() in DualShock4 controller
+     #setupapi required by hidapi
+     #dinput8 required by libstem_gamepad
+-    list(APPEND PLATFORM_LIBS bthprops setupapi hid dinput8)
++    list(APPEND PLATFORM_LIBS bthprops setupapi hid dinput8 winmm)
+     IF(MINGW)
+         #list(APPEND PLATFORM_LIBS stdc++)
+     ENDIF(MINGW)
+diff --git a/cmake/Version.cmake b/cmake/Version.cmake
+index 476277a..e445dd6 100644
+--- a/cmake/Version.cmake
++++ b/cmake/Version.cmake
+@@ -1,38 +1,8 @@
+-#------------------------
+-# Project Version
+-#------------------------
+-
+-# Retrieve version from header file
+ set(PSM_VERSION_HEADER_FILE "${ROOT_DIR}/src/psmoveprotocol/ProtocolVersion.h")
+-
+-file(STRINGS ${PSM_VERSION_HEADER_FILE} PSM_VERSION_PARTS
+-  REGEX "^#define[ \t]+PSM_RELEASE_VERSION_(PRODUCT|MAJOR|PHASE|MINOR|RELEASE|HOTFIX)[ \t]+[0-9a-z]+$")
+-  
+-# Verify version parts
+-string(REGEX MATCH "PSM_RELEASE_VERSION_PRODUCT[ \t]+[0-9a-z]+" PSM_VERSION_PRODUCT  ${PSM_VERSION_PARTS})
+-string(REGEX MATCH "PSM_RELEASE_VERSION_MAJOR[ \t]+[0-9a-z]+" PSM_VERSION_MAJOR  ${PSM_VERSION_PARTS})
+-string(REGEX MATCH "PSM_RELEASE_VERSION_PHASE[ \t]+[0-9a-z]+" PSM_VERSION_PHASE  ${PSM_VERSION_PARTS})
+-string(REGEX MATCH "PSM_RELEASE_VERSION_MINOR[ \t]+[0-9a-z]+" PSM_VERSION_MINOR  ${PSM_VERSION_PARTS})
+-string(REGEX MATCH "PSM_RELEASE_VERSION_RELEASE[ \t]+[0-9a-z]+" PSM_VERSION_RELEASE  ${PSM_VERSION_PARTS})
+-string(REGEX MATCH "PSM_RELEASE_VERSION_HOTFIX[ \t]+[0-9a-z]+" PSM_VERSION_HOTFIX  ${PSM_VERSION_PARTS})
+-
+-if(NOT PSM_VERSION_PRODUCT 
+-    OR NOT PSM_VERSION_MAJOR 
+-    OR NOT PSM_VERSION_PHASE 
+-    OR NOT PSM_VERSION_MINOR 
+-    OR NOT PSM_VERSION_RELEASE
+-    OR NOT PSM_VERSION_HOTFIX)
+-  message(FATAL_ERROR "Unable to retrieve project version from ${PSM_VERSION_HEADER_FILE}")
+-endif()
+-
+-# Extract version numbers
+-string(REGEX REPLACE "PSM_RELEASE_VERSION_PRODUCT[ \t]+([0-9a-z]+)" "\\1" PSM_VERSION_PRODUCT  ${PSM_VERSION_PRODUCT})
+-string(REGEX REPLACE "PSM_RELEASE_VERSION_MAJOR[ \t]+([0-9a-z]+)" "\\1" PSM_VERSION_MAJOR  ${PSM_VERSION_MAJOR})
+-string(REGEX REPLACE "PSM_RELEASE_VERSION_PHASE[ \t]+([0-9a-z]+)" "\\1" PSM_VERSION_PHASE  ${PSM_VERSION_PHASE})
+-string(REGEX REPLACE "PSM_RELEASE_VERSION_MINOR[ \t]+([0-9a-z]+)" "\\1" PSM_VERSION_MINOR  ${PSM_VERSION_MINOR})
+-string(REGEX REPLACE "PSM_RELEASE_VERSION_RELEASE[ \t]+([0-9a-z]+)" "\\1" PSM_VERSION_RELEASE  ${PSM_VERSION_RELEASE})
+-string(REGEX REPLACE "PSM_RELEASE_VERSION_HOTFIX[ \t]+([0-9a-z]+)" "\\1" PSM_VERSION_HOTFIX  ${PSM_VERSION_HOTFIX})
+-
+-set(PSM_VERSION_STRING "${PSM_VERSION_PRODUCT}.${PSM_VERSION_MAJOR}_${PSM_VERSION_PHASE}${PSM_VERSION_MINOR}.${PSM_VERSION_RELEASE}.${PSM_VERSION_HOTFIX}")
+-
++file(READ "${PSM_VERSION_HEADER_FILE}" version_text)
++foreach(part MAJOR MINOR BUILD REVISION)
++    string(REGEX MATCH "PSM_RELEASE_VERSION_${part}[ \t]+([0-9]+)" match "${version_text}")
++    set(PSM_VERSION_${part} "${CMAKE_MATCH_1}")
++endforeach()
++set(PSM_VERSION_STRING "${PSM_VERSION_MAJOR}.${PSM_VERSION_MINOR}.${PSM_VERSION_BUILD}.${PSM_VERSION_REVISION}")
+ message(STATUS "Project version: ${PSM_VERSION_STRING}")
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 7d2769f..3d072cf 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -10,4 +10,7 @@ add_subdirectory(psmoveclient)
+ MESSAGE(STATUS "Stepping into psmoveconfigtool")
+ add_subdirectory(psmoveconfigtool)
+ MESSAGE(STATUS "Stepping into tests")
+-add_subdirectory(tests)
++option(BUILD_LEGACY_TESTS "Build obsolete upstream test executables" OFF)
++if(BUILD_LEGACY_TESTS)
++    add_subdirectory(tests)
++endif()
+diff --git a/src/psmoveclient/ClientConstants.h b/src/psmoveclient/ClientConstants.h
+index 3c9eebc..6747788 100644
+--- a/src/psmoveclient/ClientConstants.h
++++ b/src/psmoveclient/ClientConstants.h
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #ifndef CLIENT_CONSTANTS_H
+ #define CLIENT_CONSTANTS_H
+ 
+diff --git a/src/psmoveclient/PSMoveClient.cpp b/src/psmoveclient/PSMoveClient.cpp
+index 2077145..606e36a 100644
+--- a/src/psmoveclient/PSMoveClient.cpp
++++ b/src/psmoveclient/PSMoveClient.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "PSMoveClient.h"
+ #include "ClientRequestManager.h"
+diff --git a/src/psmoveclient/PSMoveClient_CAPI.cpp b/src/psmoveclient/PSMoveClient_CAPI.cpp
+index fde7f55..6f93390 100644
+--- a/src/psmoveclient/PSMoveClient_CAPI.cpp
++++ b/src/psmoveclient/PSMoveClient_CAPI.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ // -- includes -----
+ #include "PSMoveClient_CAPI.h"
+ #include "PSMoveClient.h"
+diff --git a/src/psmoveconfigtool/App.cpp b/src/psmoveconfigtool/App.cpp
+index 45f9ed1..0be9b4f 100644
+--- a/src/psmoveconfigtool/App.cpp
++++ b/src/psmoveconfigtool/App.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "App.h"
+ #include "AppStage.h"
+diff --git a/src/psmoveconfigtool/App.h b/src/psmoveconfigtool/App.h
+index 6bf47c4..88418c5 100644
+--- a/src/psmoveconfigtool/App.h
++++ b/src/psmoveconfigtool/App.h
+@@ -1,3 +1,5 @@
++#include <string>
++#include <chrono>
+ #ifndef APP_H
+ #define APP_H
+ 
+diff --git a/src/psmoveconfigtool/AppStage_AccelerometerCalibration.cpp b/src/psmoveconfigtool/AppStage_AccelerometerCalibration.cpp
+index c6196a3..508203f 100644
+--- a/src/psmoveconfigtool/AppStage_AccelerometerCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_AccelerometerCalibration.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_AccelerometerCalibration.h"
+ #include "AppStage_ControllerSettings.h"
+diff --git a/src/psmoveconfigtool/AppStage_ColorCalibration.cpp b/src/psmoveconfigtool/AppStage_ColorCalibration.cpp
+index ea9c55d..5b0f933 100644
+--- a/src/psmoveconfigtool/AppStage_ColorCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_ColorCalibration.cpp
+@@ -453,7 +453,7 @@ void AppStage_ColorCalibration::update()
+ 							),
+ 							cv::FONT_HERSHEY_PLAIN,
+ 							0.75,
+-							CvScalar(0, 255, 255),
++							cv::Scalar(0, 255, 255),
+ 							1
+ 						);
+ 					}
+diff --git a/src/psmoveconfigtool/AppStage_ColorCalibration.h b/src/psmoveconfigtool/AppStage_ColorCalibration.h
+index f5f6b15..6644154 100644
+--- a/src/psmoveconfigtool/AppStage_ColorCalibration.h
++++ b/src/psmoveconfigtool/AppStage_ColorCalibration.h
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #ifndef APP_STAGE_COLOR_CALIBRATION_H
+ #define APP_STAGE_COLOR_CALIBRATION_H
+ 
+diff --git a/src/psmoveconfigtool/AppStage_ControllerSettings.cpp b/src/psmoveconfigtool/AppStage_ControllerSettings.cpp
+index 82e499a..3f3692b 100644
+--- a/src/psmoveconfigtool/AppStage_ControllerSettings.cpp
++++ b/src/psmoveconfigtool/AppStage_ControllerSettings.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_ControllerSettings.h"
+ #include "AppStage_AccelerometerCalibration.h"
+@@ -1172,6 +1173,7 @@ void AppStage_ControllerSettings::renderUI()
+ 											if (controllerInfo.OrientationFilterName == "ComplementaryMARG" ||
+ 												controllerInfo.OrientationFilterName == "MadgwickMARG" ||
+ 												controllerInfo.OrientationFilterName == "MadgwickARG" ||
++                                                controllerInfo.OrientationFilterName == "ComplementaryOpticalARG" ||
+ 												controllerInfo.OrientationFilterName == "OrientationExternal" ||
+ 												controllerInfo.ControllerType == PSMController_Virtual)
+ 											{
+@@ -1363,7 +1365,7 @@ void AppStage_ControllerSettings::renderUI()
+ 													ImGui::Unindent();
+ 												}
+ 											}
+-											else if (controllerInfo.OrientationFilterName == "MadgwickMARG" || controllerInfo.OrientationFilterName == "MadgwickARG")
++											else if (controllerInfo.OrientationFilterName == "MadgwickMARG" || controllerInfo.OrientationFilterName == "MadgwickARG" || controllerInfo.OrientationFilterName == "ComplementaryOpticalARG")
+ 											{
+ 												settings_shown = true;
+ 
+@@ -2463,7 +2465,8 @@ void AppStage_ControllerSettings::handle_controller_list_response(
+                     ControllerInfo.GyroGainIndex = -1;
+                 }
+ 
+-                if (ControllerResponse.controller_type() == PSMoveProtocol::PSMOVE ||
++                if (ControllerResponse.controller_type() == PSMoveProtocol::PSDUALSHOCK4 ||
++                    ControllerResponse.controller_type() == PSMoveProtocol::PSMOVE ||
+                     ControllerResponse.controller_type() == PSMoveProtocol::PSNAVI ||
+                     ControllerResponse.controller_type() == PSMoveProtocol::VIRTUALCONTROLLER)
+                 {
+diff --git a/src/psmoveconfigtool/AppStage_ControllerSettings.h b/src/psmoveconfigtool/AppStage_ControllerSettings.h
+index f6ec6ef..b49c8a3 100644
+--- a/src/psmoveconfigtool/AppStage_ControllerSettings.h
++++ b/src/psmoveconfigtool/AppStage_ControllerSettings.h
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #ifndef APP_STAGE_CONTROLLER_SETTINGS_H
+ #define APP_STAGE_CONTROLLER_SETTINGS_H
+ 
+diff --git a/src/psmoveconfigtool/AppStage_DistortionCalibration.cpp b/src/psmoveconfigtool/AppStage_DistortionCalibration.cpp
+index c7eeb84..d4c3852 100644
+--- a/src/psmoveconfigtool/AppStage_DistortionCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_DistortionCalibration.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ // Derived From example 11-1 of "Learning OpenCV: Computer Vision with the OpenCV Library" by Gary Bradski
+ 
+ //-- includes -----
+diff --git a/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp b/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp
+index 06b3b6e..1ca2d3c 100644
+--- a/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_GyroscopeCalibration.h"
+ #include "AppStage_ControllerSettings.h"
+diff --git a/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp b/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp
+index 9983ad3..df1db7c 100644
+--- a/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_HMDGyroscopeCalibration.h"
+ #include "AppStage_HMDSettings.h"
+diff --git a/src/psmoveconfigtool/AppStage_MagnetometerCalibration.cpp b/src/psmoveconfigtool/AppStage_MagnetometerCalibration.cpp
+index 3d25582..b85714e 100644
+--- a/src/psmoveconfigtool/AppStage_MagnetometerCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_MagnetometerCalibration.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_MagnetometerCalibration.h"
+ #include "AppStage_ControllerSettings.h"
+diff --git a/src/psmoveconfigtool/AppStage_MainMenu.cpp b/src/psmoveconfigtool/AppStage_MainMenu.cpp
+index 831d8ff..5f517d4 100644
+--- a/src/psmoveconfigtool/AppStage_MainMenu.cpp
++++ b/src/psmoveconfigtool/AppStage_MainMenu.cpp
+@@ -75,7 +75,7 @@ void AppStage_MainMenu::renderUI()
+ 			ImGuiWindowFlags_NoCollapse;
+ 
+ 		char szWindowTitle[255];
+-		snprintf(szWindowTitle, sizeof(szWindowTitle), "PSMove Config Tool v%s", PSM_RELEASE_VERSION_STRING);
++		snprintf(szWindowTitle, sizeof(szWindowTitle), "PSMove Config Tool v%s (DS4 fixes)", PSM_RELEASE_VERSION_STRING);
+ 
+ 		ImGui::SetNextWindowPosCenter();
+ 		ImGui::Begin(szWindowTitle, nullptr, window_flags);
+diff --git a/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp b/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp
+index e10b140..914bfbb 100644
+--- a/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp
++++ b/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_OpticalCalibration.h"
+ #include "AppStage_TrackerSettings.h"
+diff --git a/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp b/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp
+index b5a6e46..85d21b4 100644
+--- a/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp
++++ b/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_OpticalRecenter.h"
+ #include "AppStage_ComputeTrackerPoses.h"
+diff --git a/src/psmoveconfigtool/AppStage_TestTracker.cpp b/src/psmoveconfigtool/AppStage_TestTracker.cpp
+index 7e0b65e..c7a22dd 100644
+--- a/src/psmoveconfigtool/AppStage_TestTracker.cpp
++++ b/src/psmoveconfigtool/AppStage_TestTracker.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- inludes -----
+ #include "AppStage_TestTracker.h"
+ #include "AppStage_TrackerSettings.h"
+diff --git a/src/psmoveconfigtool/AppStage_TestTracker.h b/src/psmoveconfigtool/AppStage_TestTracker.h
+index 1994b3b..7c1b4ff 100644
+--- a/src/psmoveconfigtool/AppStage_TestTracker.h
++++ b/src/psmoveconfigtool/AppStage_TestTracker.h
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #ifndef APP_STAGE_TEST_TRACKER_H
+ #define APP_STAGE_TEST_TRACKER_H
+ 
+diff --git a/src/psmoveconfigtool/AppSubStage_CalibrateWithMat.cpp b/src/psmoveconfigtool/AppSubStage_CalibrateWithMat.cpp
+index 9863594..ff67a49 100644
+--- a/src/psmoveconfigtool/AppSubStage_CalibrateWithMat.cpp
++++ b/src/psmoveconfigtool/AppSubStage_CalibrateWithMat.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "AppSubStage_CalibrateWithMat.h"
+ #include "AppStage_ComputeTrackerPoses.h"
+diff --git a/src/psmoveconfigtool/CMakeLists.txt b/src/psmoveconfigtool/CMakeLists.txt
+index c8dd52f..f684447 100644
+--- a/src/psmoveconfigtool/CMakeLists.txt
++++ b/src/psmoveconfigtool/CMakeLists.txt
+@@ -3,7 +3,7 @@ set(PSMOVECONFIGTOOL_INCL_DIRS)
+ set(PSMOVECONFIGTOOL_REQ_LIBS)
+ 
+ # Boost
+-find_package(Boost REQUIRED QUIET COMPONENTS date_time)
++find_package(Boost REQUIRED QUIET COMPONENTS date_time filesystem system)
+ list(APPEND PSMOVECONFIGTOOL_INCL_DIRS ${Boost_INCLUDE_DIRS})
+ list(APPEND PSMOVECONFIGTOOL_REQ_LIBS ${Boost_LIBRARIES})
+ 
+diff --git a/src/psmoveconfigtool/Renderer.cpp b/src/psmoveconfigtool/Renderer.cpp
+index 49902ea..69abd1c 100644
+--- a/src/psmoveconfigtool/Renderer.cpp
++++ b/src/psmoveconfigtool/Renderer.cpp
+@@ -26,7 +26,7 @@
+ #endif
+ 
+ //-- constants -----
+-static const int k_window_pixel_width= 1024; // 1024×768, 1280×960, 1400×1050
++static const int k_window_pixel_width= 1024; // 1024ï¿½768, 1280ï¿½960, 1400ï¿½1050
+ static const int k_window_pixel_height= 768;
+ 
+ static const float k_camera_vfov= 35.f;
+@@ -95,7 +95,7 @@ bool Renderer::init()
+         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+ 
+-		snprintf(szWindowTitle, sizeof(szWindowTitle), "PSMove Config Tool v" PSM_RELEASE_VERSION_STRING);
++		snprintf(szWindowTitle, sizeof(szWindowTitle), "PSMove Config Tool v" PSM_RELEASE_VERSION_STRING " (DS4 fixes)");
+         m_window = SDL_CreateWindow(szWindowTitle,
+             SDL_WINDOWPOS_CENTERED,
+             SDL_WINDOWPOS_CENTERED,
+diff --git a/src/psmovemath/MathEigen.cpp b/src/psmovemath/MathEigen.cpp
+index 2e2a9e8..dabd839 100644
+--- a/src/psmovemath/MathEigen.cpp
++++ b/src/psmovemath/MathEigen.cpp
+@@ -43,7 +43,9 @@ eigen_quaternion_angle_axis(float radians, const Eigen::Vector3f &axis)
+ Eigen::Quaternionf
+ eigen_quaternion_normalized_lerp(const Eigen::Quaternionf &a, const Eigen::Quaternionf &b, const float u)
+ {
+-	Eigen::Quaternionf q(a.coeffs()*(1.f - u) + b.coeffs()*u);
++	// q and -q encode the same rotation: always interpolate on the short arc.
++	const float sign = a.dot(b) < 0.f ? -1.f : 1.f;
++	Eigen::Quaternionf q(a.coeffs()*(1.f - u) + b.coeffs()*(sign*u));
+ 	q.normalize();
+ 
+ 	return q;
+diff --git a/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp b/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp
+index 74c3694..7ae4fce 100644
+--- a/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp
++++ b/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "DeviceTypeManager.h"
+ #include "DeviceEnumerator.h"
+diff --git a/src/psmoveservice/Device/Manager/TrackerManager.cpp b/src/psmoveservice/Device/Manager/TrackerManager.cpp
+index 99b1b3d..5d23622 100644
+--- a/src/psmoveservice/Device/Manager/TrackerManager.cpp
++++ b/src/psmoveservice/Device/Manager/TrackerManager.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "PSMoveService.h"
+ #include "TrackerManager.h"
+diff --git a/src/psmoveservice/Device/USB/LibUSBApi.cpp b/src/psmoveservice/Device/USB/LibUSBApi.cpp
+index 93310a7..a25e72a 100644
+--- a/src/psmoveservice/Device/USB/LibUSBApi.cpp
++++ b/src/psmoveservice/Device/USB/LibUSBApi.cpp
+@@ -1,3 +1,6 @@
++#ifdef _WIN32
++#include <winsock2.h>
++#endif
+ //-- includes -----
+ #include "LibUSBApi.h"
+ #include "LibUSBBulkTransferBundle.h"
+diff --git a/src/psmoveservice/Device/View/ServerControllerView.cpp b/src/psmoveservice/Device/View/ServerControllerView.cpp
+index 8d03e15..8c226b0 100644
+--- a/src/psmoveservice/Device/View/ServerControllerView.cpp
++++ b/src/psmoveservice/Device/View/ServerControllerView.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "ServerControllerView.h"
+ 
+@@ -2942,6 +2943,7 @@ static void post_optical_filter_packet_for_ds4(
+ 
+     if (pose_estimation->bOrientationValid)
+     {
++        sensor_packet.has_valid_optical_orientation = true;
+         sensor_packet.optical_orientation = 
+             Eigen::Quaternionf(
+                 pose_estimation->orientation.w, 
+diff --git a/src/psmoveservice/Device/View/ServerHMDView.cpp b/src/psmoveservice/Device/View/ServerHMDView.cpp
+index 7a646f2..9bebf32 100644
+--- a/src/psmoveservice/Device/View/ServerHMDView.cpp
++++ b/src/psmoveservice/Device/View/ServerHMDView.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "DeviceManager.h"
+ #include "ServerHMDView.h"
+diff --git a/src/psmoveservice/Filter/CompoundPoseFilter.cpp b/src/psmoveservice/Filter/CompoundPoseFilter.cpp
+index 09f9231..ab13d77 100644
+--- a/src/psmoveservice/Filter/CompoundPoseFilter.cpp
++++ b/src/psmoveservice/Filter/CompoundPoseFilter.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ // -- includes --
+ #include "CompoundPoseFilter.h"
+ #include "OrientationFilter.h"
+diff --git a/src/psmoveservice/Filter/ExternalOrientationFilter.cpp b/src/psmoveservice/Filter/ExternalOrientationFilter.cpp
+index 6af1719..209a9bc 100644
+--- a/src/psmoveservice/Filter/ExternalOrientationFilter.cpp
++++ b/src/psmoveservice/Filter/ExternalOrientationFilter.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ // -- includes -----
+ #include "ExternalOrientationFilter.h"
+ #include "MathAlignment.h"
+diff --git a/src/psmoveservice/Filter/ExternalOrientationFilter.h b/src/psmoveservice/Filter/ExternalOrientationFilter.h
+index 5897a05..24d8fde 100644
+--- a/src/psmoveservice/Filter/ExternalOrientationFilter.h
++++ b/src/psmoveservice/Filter/ExternalOrientationFilter.h
+@@ -1,3 +1,6 @@
++#ifdef _WIN32
++#include <windows.h>
++#endif
+ #ifndef EXTERNAL_ORIENTATION_FILTER_H
+ #define EXTERNAL_ORIENTATION_FILTER_H
+ 
+diff --git a/src/psmoveservice/Filter/OpticalOrientationFilter.cpp b/src/psmoveservice/Filter/OpticalOrientationFilter.cpp
+index 6034301..a7a22c8 100644
+--- a/src/psmoveservice/Filter/OpticalOrientationFilter.cpp
++++ b/src/psmoveservice/Filter/OpticalOrientationFilter.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ // -- includes -----
+ #include "OpticalOrientationFilter.h"
+ #include "MathAlignment.h"
+diff --git a/src/psmoveservice/Filter/OrientationFilter.cpp b/src/psmoveservice/Filter/OrientationFilter.cpp
+index e152005..e22b82d 100644
+--- a/src/psmoveservice/Filter/OrientationFilter.cpp
++++ b/src/psmoveservice/Filter/OrientationFilter.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ // -- includes -----
+ #include "OrientationFilter.h"
+ #include "MathAlignment.h"
+@@ -476,7 +477,8 @@ void OrientationFilterPassThru::update(
+ {
+ 	m_interpolationState->apply_timestamp_state(timestamp);
+ 
+-	if (packet.has_optical_measurement() && packet.isSynced)
++	if (packet.has_optical_measurement() && packet.isSynced &&
++        (m_constants.tracking_shape.shape_type != LightBar || packet.has_valid_optical_orientation))
+ 	{
+ 		const Eigen::Quaternionf &new_orientation= packet.optical_orientation;
+ 
+@@ -1076,7 +1078,8 @@ void OrientationFilterComplementaryOpticalARG::update(
+ 	m_interpolationState->apply_timestamp_state(timestamp);
+ 
+ 	// Blend with optical yaw
+-	if (packet.has_optical_measurement() && packet.isSynced)
++	if (packet.has_optical_measurement() && packet.isSynced &&
++        (m_constants.tracking_shape.shape_type != LightBar || packet.has_valid_optical_orientation))
+     {
+ 		Eigen::Quaternionf new_orientation;
+ 
+diff --git a/src/psmoveservice/Filter/OrientationFilter.h b/src/psmoveservice/Filter/OrientationFilter.h
+index 14eb2b8..488f6db 100644
+--- a/src/psmoveservice/Filter/OrientationFilter.h
++++ b/src/psmoveservice/Filter/OrientationFilter.h
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #ifndef ORIENTATION_FILTER_H
+ #define ORIENTATION_FILTER_H
+ 
+diff --git a/src/psmoveservice/Filter/PoseFilterInterface.cpp b/src/psmoveservice/Filter/PoseFilterInterface.cpp
+index 592596c..a20a834 100644
+--- a/src/psmoveservice/Filter/PoseFilterInterface.cpp
++++ b/src/psmoveservice/Filter/PoseFilterInterface.cpp
+@@ -65,6 +65,7 @@ void PoseFilterSpace::createFilterPacket(
+ 	outFilterPacket.current_linear_acceleration_cm_s2 = poseFilter->getAccelerationCmPerSecSqr();
+ 
+     outFilterPacket.optical_orientation = sensorPacket.optical_orientation;
++    outFilterPacket.has_valid_optical_orientation = sensorPacket.has_valid_optical_orientation;
+     outFilterPacket.optical_position_cm = sensorPacket.optical_position_cm;
+ 	outFilterPacket.tracking_projection_area_px_sqr= sensorPacket.tracking_projection_area_px_sqr;
+ 
+diff --git a/src/psmoveservice/Filter/PoseFilterInterface.h b/src/psmoveservice/Filter/PoseFilterInterface.h
+index f51fd2c..e34dff6 100644
+--- a/src/psmoveservice/Filter/PoseFilterInterface.h
++++ b/src/psmoveservice/Filter/PoseFilterInterface.h
+@@ -62,6 +62,7 @@ struct PoseSensorPacket
+     Eigen::Vector3f optical_position_cm;
+     Eigen::Quaternionf optical_orientation;
+ 	float tracking_projection_area_px_sqr; // pixels^2
++    bool has_valid_optical_orientation; // independent of position validity
+ 
+     // Sensor readings in the controller's reference frame
+ 	CommonRawDeviceVector raw_imu_accelerometer;
+@@ -80,6 +81,7 @@ struct PoseSensorPacket
+ 		optical_position_cm= Eigen::Vector3f::Zero();
+ 		optical_orientation= Eigen::Quaternionf::Identity();
+ 		tracking_projection_area_px_sqr= 0.f;
++        has_valid_optical_orientation= false;
+ 
+ 		raw_imu_accelerometer.clear();
+ 		raw_imu_magnetometer.clear();
+diff --git a/src/psmoveservice/Filter/PositionExternalAttachment.h b/src/psmoveservice/Filter/PositionExternalAttachment.h
+index 4d88d3d..2ad246f 100644
+--- a/src/psmoveservice/Filter/PositionExternalAttachment.h
++++ b/src/psmoveservice/Filter/PositionExternalAttachment.h
+@@ -1,3 +1,6 @@
++#ifdef _WIN32
++#include <windows.h>
++#endif
+ #ifndef POSITION_EXTERNAL_ATTACHMENT_FILTER_H
+ #define POSITION_EXTERNAL_ATTACHMENT_FILTER_H
+ 
+diff --git a/src/psmoveservice/MorpheusHMD/MorpheusHMD.cpp b/src/psmoveservice/MorpheusHMD/MorpheusHMD.cpp
+index 66ee908..ec3c4cf 100644
+--- a/src/psmoveservice/MorpheusHMD/MorpheusHMD.cpp
++++ b/src/psmoveservice/MorpheusHMD/MorpheusHMD.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "AtomicPrimitives.h"
+ #include "MorpheusHMD.h"
+diff --git a/src/psmoveservice/PSDualShock4/PSDualShock4Controller.cpp b/src/psmoveservice/PSDualShock4/PSDualShock4Controller.cpp
+index 4fa3422..7d3e0b5 100644
+--- a/src/psmoveservice/PSDualShock4/PSDualShock4Controller.cpp
++++ b/src/psmoveservice/PSDualShock4/PSDualShock4Controller.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ //-- includes -----
+ #include "AtomicPrimitives.h"
+ #include "PSDualShock4Controller.h"
+@@ -492,6 +493,9 @@ PSDualShock4ControllerConfig::config2ptree()
+ 	pt.put("Calibration.Accel.Y.d", accelerometer_drift.j);
+ 	pt.put("Calibration.Accel.Z.d", accelerometer_drift.k);
+ 	pt.put("Calibration.Accel.Variance", accelerometer_variance);
++    pt.put("Calibration.Gyro.RawBias.X", raw_gyro_bias.i);
++    pt.put("Calibration.Gyro.RawBias.Y", raw_gyro_bias.j);
++    pt.put("Calibration.Gyro.RawBias.Z", raw_gyro_bias.k);
+     pt.put("Calibration.Gyro.Gain", gyro_gain);
+     pt.put("Calibration.Gyro.Variance", gyro_variance);
+     pt.put("Calibration.Gyro.Drift", gyro_drift);
+@@ -591,6 +595,9 @@ PSDualShock4ControllerConfig::ptree2config(const boost::property_tree::ptree &pt
+ 		mean_update_time_delta= pt.get<float>("Calibration.Time.MeanUpdateTime", mean_update_time_delta);
+ 
+         // Use the current gyroscope values (constructor defaults) as the default values
++        raw_gyro_bias.i= pt.get<float>("Calibration.Gyro.RawBias.X", 0.f);
++        raw_gyro_bias.j= pt.get<float>("Calibration.Gyro.RawBias.Y", 0.f);
++        raw_gyro_bias.k= pt.get<float>("Calibration.Gyro.RawBias.Z", 0.f);
+         gyro_gain= pt.get<float>("Calibration.Gyro.Gain", gyro_gain);
+         gyro_variance= pt.get<float>("Calibration.Gyro.Variance", gyro_variance);
+         gyro_drift= pt.get<float>("Calibration.Gyro.Drift", gyro_drift);
+@@ -827,9 +834,9 @@ void DualShock4ControllerInputState::parseDataInput(
+         CalibratedAccelerometer.k = (static_cast<float>(RawAccelerometer[2]) - accel_d.k) * accel_k.k + accel_b.k;
+ 
+         // calibrated_gyro= raw_gyro*gyro_gain + gyro_bias
+-        CalibratedGyro.i = static_cast<float>(RawGyro[0]) * config->gyro_gain;
+-        CalibratedGyro.j = static_cast<float>(RawGyro[1]) * config->gyro_gain;
+-        CalibratedGyro.k = static_cast<float>(RawGyro[2]) * config->gyro_gain;
++        CalibratedGyro.i = (static_cast<float>(RawGyro[0]) - config->raw_gyro_bias.i) * config->gyro_gain;
++        CalibratedGyro.j = (static_cast<float>(RawGyro[1]) - config->raw_gyro_bias.j) * config->gyro_gain;
++        CalibratedGyro.k = (static_cast<float>(RawGyro[2]) - config->raw_gyro_bias.k) * config->gyro_gain;
+     }
+ 
+     // Sequence and timestamp
+diff --git a/src/psmoveservice/PSDualShock4/PSDualShock4Controller.h b/src/psmoveservice/PSDualShock4/PSDualShock4Controller.h
+index c02a326..a4be9e7 100644
+--- a/src/psmoveservice/PSDualShock4/PSDualShock4Controller.h
++++ b/src/psmoveservice/PSDualShock4/PSDualShock4Controller.h
+@@ -96,6 +96,7 @@ public:
+ 		, filter_position_kalman_disable_cutoff(true)
+ 		, filter_madgwick_smart_correct(true)
+     {
++		raw_gyro_bias.set(0.f, 0.f, 0.f);
+ 		offset_position.set(0.0f, 0.0f, 0.0f);
+ 		offset_orientation.set(0.0f, 0.0f, 0.0f);
+ 		offset_world_orientation.set(0.0f, 0.0f, 0.0f);
+@@ -184,7 +185,9 @@ public:
+     // The calibrated "down" direction
+     CommonDeviceVector identity_gravity_direction;
+ 
+-    // calibrated_gyro= raw_gyro*gyro_gain
++    // Bias is in raw sensor counts; subtract before conversion to rad/s.
++    CommonDeviceVector raw_gyro_bias;
++    // calibrated_gyro= (raw_gyro-raw_gyro_bias)*gyro_gain
+     float gyro_gain;
+     // The variance of the raw gyro readings in rad/sec^2
+     float gyro_variance;
+diff --git a/src/psmoveservice/PSMoveTracker/PSEye/PSEyeVideoCapture.cpp b/src/psmoveservice/PSMoveTracker/PSEye/PSEyeVideoCapture.cpp
+index 17bb2c8..d1a43a1 100644
+--- a/src/psmoveservice/PSMoveTracker/PSEye/PSEyeVideoCapture.cpp
++++ b/src/psmoveservice/PSMoveTracker/PSEye/PSEyeVideoCapture.cpp
+@@ -434,7 +434,7 @@ public:
+ 					cv::Point(128, capFrame.rows / 2),
+ 					cv::FONT_HERSHEY_DUPLEX,
+ 					1.0,
+-					CvScalar(255, 255, 255),
++					cv::Scalar(255, 255, 255),
+ 					2
+ 				);
+ 				m_frameAvailable = true;
+@@ -461,7 +461,7 @@ public:
+ 					cv::Point(128, capFrame.rows / 2),
+ 					cv::FONT_HERSHEY_DUPLEX,
+ 					1.0,
+-					CvScalar(255, 255, 255),
++					cv::Scalar(255, 255, 255),
+ 					2
+ 				);
+ 				m_frameAvailable = true;
+@@ -517,7 +517,7 @@ protected:
+     
+     bool open(int _index)
+     {
+-		capFrame = cv::Mat(480, 640, CV_8UC3, CvScalar(0, 0, 0));
++		capFrame = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0, 0, 0));
+ 
+         // Enumerate libusb devices
+         std::vector<ps3eye::PS3EYECam::PS3EYERef> devices = ps3eye::PS3EYECam::getDevices();
+@@ -721,7 +721,7 @@ public:
+ 				cv::Point(64, capFrameSD.rows / 2),
+ 				cv::FONT_HERSHEY_DUPLEX,
+ 				1.0,
+-				CvScalar(255, 255, 255),
++				cv::Scalar(255, 255, 255),
+ 				2
+ 			);
+ 
+@@ -765,7 +765,7 @@ public:
+ 				cv::Point(64, capFrameSD.rows / 2),
+ 				cv::FONT_HERSHEY_DUPLEX,
+ 				1.0,
+-				CvScalar(255, 255, 255),
++				cv::Scalar(255, 255, 255),
+ 				2
+ 			);
+ 
+@@ -820,7 +820,7 @@ public:
+ 					cv::Point(64, capFrameSD.rows / 2),
+ 					cv::FONT_HERSHEY_DUPLEX,
+ 					1.0,
+-					CvScalar(255, 255, 255),
++					cv::Scalar(255, 255, 255),
+ 					2
+ 				);
+ 
+@@ -857,7 +857,7 @@ public:
+ 				cv::Point(256, capFrameHD.rows / 2),
+ 				cv::FONT_HERSHEY_DUPLEX,
+ 				3.0,
+-				CvScalar(255, 255, 255),
++				cv::Scalar(255, 255, 255),
+ 				5
+ 			);
+ 
+@@ -902,7 +902,7 @@ public:
+ 				cv::Point(256, capFrameHD.rows / 2),
+ 				cv::FONT_HERSHEY_DUPLEX,
+ 				3.0,
+-				CvScalar(255, 255, 255),
++				cv::Scalar(255, 255, 255),
+ 				5
+ 			);
+ 
+@@ -959,7 +959,7 @@ public:
+ 					cv::Point(256, capFrameHD.rows / 2),
+ 					cv::FONT_HERSHEY_DUPLEX,
+ 					3.0,
+-					CvScalar(255, 255, 255),
++					cv::Scalar(255, 255, 255),
+ 					5
+ 				);
+ 
+@@ -1061,8 +1061,8 @@ protected:
+ 	bool open(int _index)
+ 	{
+ 		m_index = _index;
+-		capFrameSD = cv::Mat(480, 640, CV_8UC3, CvScalar(0, 0, 0));
+-		capFrameHD = cv::Mat(1080, 1920, CV_8UC3, CvScalar(0, 0, 0));
++		capFrameSD = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0, 0, 0));
++		capFrameHD = cv::Mat(1080, 1920, CV_8UC3, cv::Scalar(0, 0, 0));
+ 
+ #ifdef SERVER_LOG_H
+ 		SERVER_LOG_INFO("ps3eye::VIRTUAL()") << "Index " << m_index << " open.";
+diff --git a/src/psmoveservice/Server/ServerNetworkManager.cpp b/src/psmoveservice/Server/ServerNetworkManager.cpp
+index 950bdf7..7e46bd2 100644
+--- a/src/psmoveservice/Server/ServerNetworkManager.cpp
++++ b/src/psmoveservice/Server/ServerNetworkManager.cpp
+@@ -583,7 +583,7 @@ public:
+         ClientConnectionPtr new_connection = 
+             ClientConnection::create(
+                 this, 
+-                m_tcp_acceptor.get_io_service(), 
++                m_io_service, 
+                 m_udp_socket, 
+                 m_request_handler_ref);
+ 
+diff --git a/src/psmoveservice/Server/ServerNetworkManager.h b/src/psmoveservice/Server/ServerNetworkManager.h
+index 3cbe7eb..ffa31a5 100644
+--- a/src/psmoveservice/Server/ServerNetworkManager.h
++++ b/src/psmoveservice/Server/ServerNetworkManager.h
+@@ -1,3 +1,4 @@
++#include <boost/asio/io_service.hpp>
+ #ifndef SERVER_NETWORK_MANAGER_H
+ #define SERVER_NETWORK_MANAGER_H
+ 
+@@ -10,7 +11,7 @@ class ServerRequestHandler;
+ 
+ namespace boost {
+     namespace asio {
+-        class io_service;
++        // io_service is provided by the Asio compatibility header.
+     }
+ }
+ 
+diff --git a/src/psmoveservice/Server/ServerRequestHandler.cpp b/src/psmoveservice/Server/ServerRequestHandler.cpp
+index ec215db..5893fea 100644
+--- a/src/psmoveservice/Server/ServerRequestHandler.cpp
++++ b/src/psmoveservice/Server/ServerRequestHandler.cpp
+@@ -1,5 +1,6 @@
+ //-- includes -----
+ #include "ServerRequestHandler.h"
++#include <cmath>
+ 
+ #include "BluetoothRequests.h"
+ #include "BluetoothQueries.h"
+@@ -1728,16 +1729,30 @@ protected:
+                 const auto &request = context.request->set_controller_gyroscope_calibration_request();
+ 
+                 bool bChanged = false;
+-
+-                if (config.gyro_drift != request.drift())
++                if (request.has_raw_bias())
+                 {
+-                    config.gyro_drift= request.drift();
++                    const float x = request.raw_bias().i();
++                    const float y = request.raw_bias().j();
++                    const float z = request.raw_bias().k();
++                    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
++                        fabsf(x) > 32768.f || fabsf(y) > 32768.f || fabsf(z) > 32768.f)
++                    {
++                        response->set_result_code(PSMoveProtocol::Response_ResultCode_RESULT_ERROR);
++                        return;
++                    }
++                    config.raw_gyro_bias.set(x, y, z);
+                     bChanged = true;
+                 }
+-
+-                if (config.gyro_variance != request.variance())
++                // Config Tool measures DS4 noise in raw counts. Store SI units.
++                // Negative values are the UI's sentinel for preserving calibration.
++                if (request.drift() >= 0.f && std::isfinite(request.drift()))
+                 {
+-                    config.gyro_variance= request.variance();
++                    config.gyro_drift = request.drift() * config.gyro_gain;
++                    bChanged = true;
++                }
++                if (request.variance() >= 0.f && std::isfinite(request.variance()))
++                {
++                    config.gyro_variance = request.variance() * config.gyro_gain * config.gyro_gain;
+                     bChanged = true;
+                 }
+ 
+diff --git a/src/tests/test_kalman_filter.cpp b/src/tests/test_kalman_filter.cpp
+index 479809c..234096b 100644
+--- a/src/tests/test_kalman_filter.cpp
++++ b/src/tests/test_kalman_filter.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #include "DeviceInterface.h"
+ #include "KalmanPoseFilter.h"
+ #include "CompoundPoseFilter.h"

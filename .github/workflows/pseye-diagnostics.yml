@@ -4,6 +4,7 @@ on:
     paths:
       - 'utils/PSEyeCapture/**'
       - 'utils/PSEyeCapture.Tests/**'
+      - 'utils/PSMoveServiceExFixes/**'
       - 'DS4Windows/DS4Control/OpticalTracking/**'
       - '.github/workflows/pseye-diagnostics.yml'
   push:
@@ -12,6 +13,32 @@ on:
 permissions:
   contents: read
 jobs:
+  native-ds4-regressions:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Timocop/PSMoveServiceEx
+          ref: 308cb9ea55dc1ed32b2c0d60e63d73b1b3c5d9f1
+          path: .pseye-service-source
+      - name: Apply pinned native fixes
+        shell: pwsh
+        run: |
+          git -C .pseye-service-source submodule update --init --depth 1 thirdparty/eigen thirdparty/protobuf thirdparty/imgui thirdparty/PS3EYEDriver thirdparty/libstem_gamepad
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned source initialization failed' }
+          python utils/PSMoveServiceExFixes/apply-patches.py .pseye-service-source
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixes did not apply' }
+      - name: Test actual upstream filter and quaternion code
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path .pseye-service-source).Path.Replace('\', '/')
+          cmake -S utils/PSMoveServiceExFixes/tests -B .pseye-native-tests -A x64 "-DPSM_SOURCE=$source"
+          if ($LASTEXITCODE -ne 0) { throw 'Native regression configuration failed' }
+          cmake --build .pseye-native-tests --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Native regression build failed' }
+          ctest --test-dir .pseye-native-tests -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Native filter regressions failed' }
   synthetic-pipeline:
     runs-on: windows-2022
     steps:
