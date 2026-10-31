@@ -18,7 +18,7 @@ static class Program
         if (args.Contains("--probe")) { Environment.ExitCode = LiveProbe(serviceDirectory).GetAwaiter().GetResult(); return; }
         if (args.Contains("--self-test")) { Environment.ExitCode = SelfTest().GetAwaiter().GetResult(); return; }
         ApplicationConfiguration.Initialize();
-        Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory, !args.Contains("--no-start")));
+        Application.Run(new Preview(args.Contains("--synthetic"), serviceDirectory, !args.Contains("--no-start"), args.Contains("--tv-calibration")));
     }
     static int PoseProbe()
     {
@@ -184,7 +184,7 @@ sealed class Preview : Form
     long latest, started, frames;
     bool dirty;
     readonly bool synthetic;
-    public Preview(bool synthetic, string serviceDirectory, bool autoStart = false)
+    public Preview(bool synthetic, string serviceDirectory, bool autoStart = false, bool tvCalibration = false)
     {
         this.synthetic = synthetic;
         serviceFolder.Text = serviceDirectory;
@@ -223,6 +223,7 @@ sealed class Preview : Form
         Shown+=(_,_)=>cameraLayout.SplitterDistance=Math.Max(100,cameraLayout.Width-460);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
         var tvTab=new TabPage("TV calibration"); tvTab.Controls.Add(new TvCalibrationPanel(nativePose)); tabs.TabPages.Add(tvTab);
+        if(tvCalibration) tabs.SelectedTab=tvTab;
         var gyroTab=new TabPage("Gyro calibration"); gyroTab.Controls.Add(new GyroCalibrationPanel(()=>serviceFolder.Text)); tabs.TabPages.Add(gyroTab);
         var fusionTab=new TabPage("Fusion / tuning");
         var tuning=new TextBox { Dock=DockStyle.Fill,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Both,WordWrap=false,Font=new Font("Consolas",10) };
