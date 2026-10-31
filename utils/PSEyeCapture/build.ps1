@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Diagnostic restore failed' }
 & $DotnetExe publish "$PSScriptRoot\PSEyeCapture.csproj" --no-restore -c Release -o $OutputDirectory
 if ($LASTEXITCODE -ne 0) { throw 'Diagnostic build failed' }
 Copy-Item "$PSScriptRoot\bin\native\pseye-capture.exe","$PSScriptRoot\bin\native\PSMoveClient_CAPI.dll","$PSScriptRoot\bin\native\PSMoveServiceEx-LICENSE.txt","$PSScriptRoot\bin\native\DS4Windows-COPYING.txt" $OutputDirectory
-Copy-Item "$PSScriptRoot\README.md","$PSScriptRoot\THIRD_PARTY_NOTICES.md" $OutputDirectory
+Copy-Item "$PSScriptRoot\README.md","$PSScriptRoot\THIRD_PARTY_NOTICES.md","$PSScriptRoot\PROJECT_BOUNDARIES.md" $OutputDirectory
 $testProcess = Start-Process "$OutputDirectory\PSEyeCapture.exe" -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
 if (!$testProcess.WaitForExit(15000)) { $testProcess.Kill(); throw 'Synthetic pipeline test timed out' }
 Get-Content "$OutputDirectory\self-test.txt"

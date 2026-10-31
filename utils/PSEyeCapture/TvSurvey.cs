@@ -14,6 +14,16 @@ record TvSurveyReference(float DiagonalInches, float WidthMeters, float HeightMe
 
 static class TvSurvey
 {
+    public static string MeasurementCalibrationJson(TvSurveyReference reference,string surveySession,string display) =>
+        System.Text.Json.JsonSerializer.Serialize(new {
+            Version=3,CalibrationComplete=true,MeasurementValidated=true,PointingValidated=false,
+            Method="TapeSurveyFixedOrigin",ValidationMethod="TapeDistanceConsistencyAndReferenceStability",
+            CreatedUtc=DateTime.UtcNow,Display=display,Reference=reference,Model=reference.Model,
+            FixedServiceRayOrigin=reference.FixedServiceRayOrigin,SurveySession=surveySession,
+            Basis="Four tape distances plus confirmed flat, straight-facing controller attitude and ten-second tracking average",
+            Scope="Reference location; screen pointing accuracy and translation to other locations are untested",
+            Invalidation="Moving camera/TV, changing tracker frame or controller, or changing the reference placement requires recalibration"
+        },new System.Text.Json.JsonSerializerOptions {WriteIndented=true,IncludeFields=true});
     // Corners: top-left, top-right, bottom-left, bottom-right as seen by viewer.
     // TV frame: screen center origin; right +X, up +Y, toward viewer +Z.
     public static TvSurveyPosition Locate(float width, float height, IReadOnlyList<double> distances, double toleranceMeters=.015)

@@ -187,3 +187,10 @@ var switchedController=surveySamples.Select((s,i)=>i>300?s with {ControllerId=s.
 Throws<InvalidOperationException>(()=>TvSurvey.Average(switchedController),"controller changes invalidate the survey recording");
 Throws<InvalidOperationException>(()=>TvSurvey.Reference(77,surveyWidth,surveyHeight,tapeDistances,surveyAverage with {OpticalSamples=0,OpticalPositionMean=null}),"missing optical anchor cannot silently become a TV alignment");
 Console.WriteLine($"PASS: {checks} total checks including survey connection identity and optical anchor validity");
+
+using(var measurementPayload=System.Text.Json.JsonDocument.Parse(TvSurvey.MeasurementCalibrationJson(surveyReference,"survey-session.json","DISPLAY1"))) {
+    var root=measurementPayload.RootElement;
+    Check(root.GetProperty("Version").GetInt32()==3 && root.GetProperty("CalibrationComplete").GetBoolean(),"measurement-only calibration is complete without target captures");
+    Check(root.GetProperty("MeasurementValidated").GetBoolean() && !root.GetProperty("PointingValidated").GetBoolean(),"measurement validation is distinguished from untested pointing accuracy");
+}
+Console.WriteLine($"PASS: {checks} total checks including measurement-only calibration persistence");
