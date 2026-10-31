@@ -250,7 +250,11 @@ sealed class Preview : Form
         cameraTab.Controls.Add(cameraLayout);
         Shown+=(_,_)=>cameraLayout.SplitterDistance=Math.Max(100,cameraLayout.Width-460);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
-        var tvTab=new TabPage("TV calibration"); tvTab.Controls.Add(new TvCalibrationPanel(nativePose)); tabs.TabPages.Add(tvTab);
+        var tvTab=new TabPage("TV calibration");
+        var tvMethods=new TabControl {Dock=DockStyle.Fill};
+        var tapeTab=new TabPage("Tape distances + 10-second reference");tapeTab.Controls.Add(new TvSurveyPanel(nativePose));
+        var aimTab=new TabPage("Multi-position aim fit (experimental)");aimTab.Controls.Add(new TvCalibrationPanel(nativePose));
+        tvMethods.TabPages.AddRange([tapeTab,aimTab]);tvTab.Controls.Add(tvMethods);tabs.TabPages.Add(tvTab);
         if(tvCalibration) tabs.SelectedTab=tvTab;
         var gyroTab=new TabPage("Gyro calibration"); gyroTab.Controls.Add(new GyroCalibrationPanel(()=>serviceFolder.Text)); tabs.TabPages.Add(gyroTab);
         var fusionTab=new TabPage("Fusion / tuning");

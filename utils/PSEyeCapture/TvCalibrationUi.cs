@@ -41,6 +41,7 @@ sealed class TvCalibrationPanel : UserControl
 
 sealed class TvTargetWindow : Form
 {
+    readonly TvSurveyReference? survey;
     readonly ServicePose source; readonly float width,height,diagonal;
     readonly string display;
     readonly System.Windows.Forms.Timer timer=new() {Interval=25};
@@ -53,9 +54,11 @@ sealed class TvTargetWindow : Form
     string notice="Move to the center position; aim at the target.";
     public string Result {get;private set;}="Calibration cancelled; nothing published.";
     Vector2 Target=>index<12?corners[index%4]:checks[Math.Min(index-12,checks.Length-1)];
-    public TvTargetWindow(ServicePose source,Screen screen,float width,float height,float diagonal)
+    public TvTargetWindow(ServicePose source,Screen screen,float width,float height,float diagonal,TvSurveyReference? survey=null)
     {
+        this.survey=survey;
         this.source=source; this.width=width; this.height=height; this.diagonal=diagonal; display=screen.DeviceName;
+        if(survey is not null) {model=survey.Model;index=12;notice="Keep the light-bar center at its surveyed location while aiming at each target. The ray origin is fixed at that reference.";}
         FormBorderStyle=FormBorderStyle.None; StartPosition=FormStartPosition.Manual; Bounds=screen.Bounds;
         BackColor=Color.FromArgb(13,18,28); ForeColor=Color.White; DoubleBuffered=true; KeyPreview=true;
         KeyDown+=async (_,e)=> {if(e.KeyCode==Keys.Escape) Close(); if(e.KeyCode==Keys.Space) {e.Handled=true; await CaptureTarget();}};
@@ -63,7 +66,7 @@ sealed class TvTargetWindow : Form
             var s=source.Sample;
             if(s is not null && sequence!=s.Sequence) {
                 sequence=s.Sequence;
-                if(s is {Fresh:true,OrientationValid:true,PositionValid:true,Optical:true}) recent.Add(s); else recent.Clear();
+                if(Usable(s)) recent.Add(s); else recent.Clear();
                 recent.RemoveAll(x=>Stopwatch.GetElapsedTime(x.Received).TotalSeconds>.65);
                 bool pressed=s.CrossDown && !cross; cross=s.CrossDown;
                 if(pressed) await CaptureTarget();
@@ -72,17 +75,18 @@ sealed class TvTargetWindow : Form
         };
         Shown+=(_,_)=> {Activate(); timer.Start();}; FormClosed+=(_,_)=>timer.Dispose();
     }
+    bool Usable(ServicePoseSample? s)=>s is {Fresh:true,OrientationValid:true} && (survey is not null || s is {PositionValid:true,Optical:true});
     string? ReadPose(out AimMeasurement measurement,out ServicePoseSample[] used)
     {
         measurement=new(Vector3.Zero,Quaternion.Identity,Target,index/4); used=recent.ToArray();
-        if(source.Sample is not {Fresh:true,OrientationValid:true,PositionValid:true,Optical:true}) return "Optical tracking lost or pose stale — expose the bar and retry.";
+        if(!Usable(source.Sample)) return survey is null?"Optical tracking lost or pose stale — expose the bar and retry.":"Orientation tracking is stale — restart tracking and retry.";
         if(used.Length<10 || Stopwatch.GetElapsedTime(used[0].Received,used[^1].Received).TotalSeconds<.4) return "Hold steady for at least half a second before capture.";
-        var position=used.Aggregate(Vector3.Zero,(sum,s)=>sum+s.Position)/used.Length;
+        var position=survey?.FixedServiceRayOrigin ?? used.Aggregate(Vector3.Zero,(sum,s)=>sum+s.Position)/used.Length;
         var reference=used[0].Orientation; var sum=Vector4.Zero;
         foreach(var s in used) {var q=s.Orientation; float sign=Quaternion.Dot(reference,q)<0?-1:1; sum+=new Vector4(q.X,q.Y,q.Z,q.W)*sign;}
         var orientation=Quaternion.Normalize(new(sum.X,sum.Y,sum.Z,sum.W));
-        if(used.Any(s=>Vector3.Distance(s.Position,position)>.015f || 2*Math.Acos(Math.Clamp(Math.Abs(Quaternion.Dot(s.Orientation,orientation)),0,1))>Math.PI/90))
-            return "Pose is moving/jittering: keep position within 15 mm and rotation within 2°.";
+        if(used.Any(s=>(survey is null && Vector3.Distance(s.Position,position)>.015f) || 2*Math.Acos(Math.Clamp(Math.Abs(Quaternion.Dot(s.Orientation,orientation)),0,1))>Math.PI/90))
+            return survey is null?"Pose is moving/jittering: keep position within 15 mm and rotation within 2°.":"Hold the aiming direction steady within 2°. Camera depth is ignored for this check.";
         measurement=new(position,orientation,Target,index<12?index/4:3); return null;
     }
     async Task CaptureTarget()
@@ -118,7 +122,7 @@ sealed class TvTargetWindow : Form
         double median=errors[errors.Length/2],worst=errors[^1];
         bool accepted=median<=.01 && worst<=.02;
         string path=SaveSession(accepted,double.IsFinite(median)?median:null,double.IsFinite(worst)?worst:null,null);
-        Result=$"{(accepted?"Validation passed":"Validation needs improvement")}: median {median:P2}, maximum {worst:P2} of physical screen diagonal.\n{path}\nNo mouse input enabled.";
+        Result=$"{(accepted?"Validation passed":"Validation needs improvement")}: median {median:P2}, maximum {worst:P2} of physical screen diagonal.\n{path}\n{(survey is null?"":"Validated only from the surveyed location; translation is not validated.\n")}No mouse input enabled.";
         MessageBox.Show(this,Result,"TV calibration result"); Close();
     }
     string SaveSession(bool accepted,double? median,double? worst,string? failure)
@@ -128,10 +132,11 @@ sealed class TvTargetWindow : Form
         string config=ServicePose.ConfigurationDirectory(source.Directory);
         var fingerprints=Directory.Exists(config)?Directory.GetFiles(config,"*.json").Where(f=>!f.Contains("before") && (Path.GetFileName(f).StartsWith("PS3EyeTrackerConfig_") || Path.GetFileName(f).StartsWith("dualshock4_")))
             .ToDictionary(f=>Path.GetFileName(f)!,f=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f)))):new Dictionary<string,string>();
-        var payload=new {Version=1,Validated=accepted,CreatedUtc=DateTime.UtcNow,Display=display,PixelBounds=Bounds,
+        var payload=new {Version=survey is null?1:2,Validated=accepted,Method=survey is null?"MultiPositionAimFit":"TapeSurveyFixedOrigin",SurveyReference=survey,
+            FixedServiceRayOrigin=survey?.FixedServiceRayOrigin,CreatedUtc=DateTime.UtcNow,Display=display,PixelBounds=Bounds,
             DiagonalInches=diagonal,Model=model,MedianDiagonalError=median,MaxDiagonalError=worst,Failure=failure,DeviceConfigFingerprints=fingerprints,Training=training,Validation=validation,
             Samples=recordings,Frame="PSMoveServiceEx world, meters; quaternion XYZW; origin at light bar; ray offset zero",
-            Invalidation="Moving camera/TV or changing tracker frame, controller, grip or intrinsics requires recalibration."};
+            Invalidation=survey is null?"Moving camera/TV or changing tracker frame, controller, grip or intrinsics requires recalibration.":"Reference-position mode: moving the controller away from the surveyed location, camera/TV/frame/grip changes require recalibration or separate translation validation."};
         var json=JsonSerializer.Serialize(payload,new JsonSerializerOptions {WriteIndented=true,IncludeFields=true}); File.WriteAllText(path,json);
         if(accepted) File.WriteAllText(Path.Combine(folder,"tv-calibration.json"),json);
         return path;
@@ -147,7 +152,7 @@ sealed class TvTargetWindow : Form
         string readiness=ReadPose(out _,out _)??"READY — press Cross (×) or Space";
         g.DrawString(phase+"\n"+notice+"\n"+readiness+"\nEsc cancels · hold your normal grip",font,text,new RectangleF(ClientSize.Width*.18f,ClientSize.Height*.35f,ClientSize.Width*.64f,ClientSize.Height*.35f));
         var s=source.Sample;
-        if(model is not null && s is {Fresh:true,OrientationValid:true,PositionValid:true,Optical:true} && model.Project(s.Position,s.Orientation) is {} hit && hit.X>=0 && hit.X<=1 && hit.Y>=0 && hit.Y<=1) {
+        if(model is not null && Usable(s) && model.Project(survey?.FixedServiceRayOrigin??s!.Position,s!.Orientation) is {} hit && hit.X>=0 && hit.X<=1 && hit.Y>=0 && hit.Y<=1) {
             using var predicted=new SolidBrush(Color.LimeGreen); g.FillEllipse(predicted,hit.X*ClientSize.Width-5,hit.Y*ClientSize.Height-5,10,10);
         }
     }

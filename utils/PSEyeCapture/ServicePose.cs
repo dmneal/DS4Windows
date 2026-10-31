@@ -11,6 +11,7 @@ record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, 
     public bool CrossDown {get;init;}
     public bool OpticalOrientationValid {get;init;}
     public bool OpticalPositionValid {get;init;}
+    public Vector3? AccelerationG {get;init;}
     public Vector3? OpticalPosition {get;init;}
     public Quaternion? OpticalOrientation {get;init;}
     public Vector3? CameraPosition {get;init;}
@@ -44,7 +45,7 @@ record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, 
                 CrossDown=r.TryGetProperty("CrossDown",out var cross) && cross.GetBoolean(),
                 OpticalOrientationValid=r.TryGetProperty("OpticalOrientationValid",out var oo) && oo.GetBoolean(),
                 OpticalPositionValid=r.TryGetProperty("OpticalPositionValid",out var op) && op.GetBoolean(),
-                OpticalPosition=Vector(r,"OpticalPosition"), OpticalOrientation=Rotation(r,"OpticalQuaternion"),
+                AccelerationG=Vector(r,"AccelG"), OpticalPosition=Vector(r,"OpticalPosition"), OpticalOrientation=Rotation(r,"OpticalQuaternion"),
                 CameraPosition=Vector(r,"CameraPosition"), CameraOrientation=Rotation(r,"CameraQuaternion"),
                 CameraPixel=Numbers(r,"CameraPixel",2) is {} pixel?new(pixel[0],pixel[1]):null,
                 TrackerId=r.TryGetProperty("TrackerId",out var tracker)?tracker.GetInt32():-1 };

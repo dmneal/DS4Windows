@@ -149,3 +149,41 @@ Check(CameraEstimates.Describe(cameraSample with {OpticalOrientationValid=false}
 Check(CameraEstimates.Describe(cameraSample with {Received=0}).Contains("Unavailable / stale"),"stale optical values hidden");
 Check(Vector3.Distance(CameraEstimates.Degrees(Quaternion.CreateFromYawPitchRoll(.3f,.2f,.1f)),new Vector3(.3f,.2f,.1f)*180/MathF.PI)<.001,"optical Euler angle convention matches Y X Z rotation");
 Console.WriteLine($"PASS: {checks} total checks including camera-only telemetry");
+
+// Tape survey: geometric position independent of noisy camera depth.
+var surveyWidth=1.7046f;var surveyHeight=.95884f;var surveyedPoint=new Vector3(.25f,-.8f,2f);
+Vector3[] surveyCorners=[new(-surveyWidth/2,surveyHeight/2,0),new(surveyWidth/2,surveyHeight/2,0),new(-surveyWidth/2,-surveyHeight/2,0),new(surveyWidth/2,-surveyHeight/2,0)];
+var tapeDistances=surveyCorners.Select(p=>(double)Vector3.Distance(p,surveyedPoint)).ToArray();
+var located=TvSurvey.Locate(surveyWidth,surveyHeight,tapeDistances);
+Check(Vector3.Distance(located.PositionMeters,surveyedPoint)<.00001f,"four tape distances recover off-center point below TV in meters");
+var badTape=(double[])tapeDistances.Clone();badTape[0]+=.5;
+Throws<ArgumentException>(()=>TvSurvey.Locate(surveyWidth,surveyHeight,badTape),"inconsistent corner lengths rejected");
+Throws<ArgumentException>(()=>TvSurvey.Locate(surveyWidth,surveyHeight,[.1,.1,.1,.1]),"impossible tape geometry rejected");
+Throws<ArgumentException>(()=>TvSurvey.Locate(surveyWidth,surveyHeight,[double.NaN,1,1,1]),"nonfinite tape lengths rejected");
+long surveyStart=System.Diagnostics.Stopwatch.GetTimestamp();
+var refRotation=Quaternion.CreateFromYawPitchRoll(.4f,.1f,-.05f);var surveyAnchor=new Vector3(.1f,-.2f,1.2f);
+var surveySamples=Enumerable.Range(0,601).Select(i=> {
+    float noise=.1f*MathF.Sin(i*MathF.PI/10);
+    var q=i%2==0?refRotation:new Quaternion(-refRotation.X,-refRotation.Y,-refRotation.Z,-refRotation.W);
+    return cameraSample with {Sequence=i,Received=surveyStart+(long)(i/60.0*System.Diagnostics.Stopwatch.Frequency),Position=surveyAnchor+new Vector3(0,0,noise),OpticalPosition=surveyAnchor+new Vector3(0,0,noise),Orientation=q,AccelerationG=Vector3.UnitY,PositionValid=true,OrientationValid=true,Optical=true,OpticalPositionValid=true};
+}).ToArray();
+var surveyAverage=TvSurvey.Average(surveySamples);
+Check(surveyAverage.Samples==601 && surveyAverage.Seconds>=9.99,"survey averages a full ten-second recording");
+Check(surveyAverage.OpticalPositionStdDev!.Value.Z>.06f && Vector3.Distance(surveyAverage.OpticalPositionMean!.Value,surveyAnchor)<.001,"large depth jitter is reported and averaged rather than resetting capture");
+Check(Math.Abs(Quaternion.Dot(surveyAverage.OrientationMean,refRotation))>.99999f,"survey quaternion mean handles antipodal representations");
+var surveyReference=TvSurvey.Reference(77,surveyWidth,surveyHeight,tapeDistances,surveyAverage);
+Check(Vector3.Distance(surveyReference.Model.Center,surveyAnchor-Vector3.Transform(surveyedPoint,refRotation))<.001,"physical reference attitude and tape position establish TV frame alignment");
+var requestedUv=new Vector2(.3f,.4f);var tvTarget=new Vector3((requestedUv.X-.5f)*surveyWidth,(.5f-requestedUv.Y)*surveyHeight,0);
+var requestedDirection=Vector3.Normalize(tvTarget-surveyedPoint);var forward=-Vector3.UnitZ;
+var localAimRotation=Quaternion.CreateFromAxisAngle(Vector3.Normalize(Vector3.Cross(forward,requestedDirection)),MathF.Acos(Vector3.Dot(forward,requestedDirection)));
+var requestedWorldRotation=Quaternion.Normalize(refRotation*localAimRotation);
+Check(surveyReference.Model.Project(surveyReference.FixedServiceRayOrigin,requestedWorldRotation) is {} surveyHit && Vector2.Distance(surveyHit,requestedUv)<.001,"tape reference maps known aiming direction to screen without camera depth updates");
+Throws<InvalidOperationException>(()=>TvSurvey.Average(surveySamples.Take(100).ToArray()),"short survey recording rejected");
+Throws<InvalidOperationException>(()=>TvSurvey.Average(surveySamples.Where((s,i)=>i<200 || i>240).ToArray()),"survey recording with stale-data gap rejected");
+var driftingSurvey=surveySamples.Select((s,i)=>s with {Orientation=Quaternion.Normalize(refRotation*Quaternion.CreateFromAxisAngle(Vector3.UnitY,i/600f*.2f))}).ToArray();
+Throws<InvalidOperationException>(()=>TvSurvey.Average(driftingSurvey),"moving or drifting reference rejected instead of averaging a wrong attitude");
+Console.WriteLine($"PASS: {checks} total checks including tape-survey geometry and ten-second averaging");
+var switchedController=surveySamples.Select((s,i)=>i>300?s with {ControllerId=s.ControllerId+1}:s).ToArray();
+Throws<InvalidOperationException>(()=>TvSurvey.Average(switchedController),"controller changes invalidate the survey recording");
+Throws<InvalidOperationException>(()=>TvSurvey.Reference(77,surveyWidth,surveyHeight,tapeDistances,surveyAverage with {OpticalSamples=0,OpticalPositionMean=null}),"missing optical anchor cannot silently become a TV alignment");
+Console.WriteLine($"PASS: {checks} total checks including survey connection identity and optical anchor validity");
