@@ -10,6 +10,12 @@ The desired output is a calibrated pointing ray intersecting the TV plane. Contr
 
 PSMoveServiceEx remains the owner of camera access, exposure, gain, lens calibration and optical tracking wherever its APIs and supported transport allow. DS4Windows remains the preferred owner of the USB controller, its calibrated IMU, light-bar settings, buttons, profiles and Windows mouse output. Do not create competing controller readers/output writers without explicitly resolving ownership.
 
+### Connection requirements
+
+The current implementation target is **USB wired DS4**. The user's phrase "USB and wired" is interpreted as wired USB now and wireless Bluetooth support later; USB is itself the wired connection. Keep that interpretation explicit until corrected. Do not require Bluetooth pairing or unplugging USB to make the initial feature work.
+
+Normalize transport-specific reports into the same timestamped controller sample contract: stable controller identity, connection type, calibrated gyro/acceleration with explicit units/axes, buttons, device timestamp when available and host monotonic receipt time. Fusion, screen calibration and mouse mapping consume this common contract. USB and Bluetooth may have different timing/rates; keep timing estimates separate from the physical camera/TV calibration. Reconnecting the same controller over another transport should preserve valid physical alignment while requiring a sensor/timing readiness check. Future Bluetooth support must receive its own live validation; do not label it supported merely because the interface exists.
+
 ## What is already verified
 
 - PS Eye video driver installed with user approval; actual SDK shared-memory video works through PSMoveServiceEx v0.27.8.
@@ -53,17 +59,21 @@ For the confirmed normal grip, fit a fixed pointing-axis offset (boresight) and 
 
 ### 3. Guided TV target collection
 
-Enter or confirm physical visible-screen dimensions, or diagonal plus aspect ratio, to fix a useful metric scale. Select the actual Windows display and account for its pixel bounds and DPI separately from physical size.
+**Ask for the TV size as a required wizard step.** The normal input is visible-screen diagonal in inches or centimeters, with an editable aspect ratio (default suggestion 16:9). Offer visible width and height as an alternative. Exclude the bezel and show the derived width/height for confirmation. Validate positive finite values and save both the entered units and canonical physical dimensions. Select the actual Windows display and account for its pixel bounds and DPI separately from physical size; screen resolution alone does not supply physical TV size.
 
-Display a full-screen target grid. At each target the user aims normally, holds still and presses a chosen controller button. Collect a short synchronized window rather than a single frame; reject motion, missing/ambiguous bar geometry, saturation and stale data. Show accepted samples and allow redo.
+For diagonal D and aspect ratio a:b, derive width = D*a/sqrt(a*a+b*b) and height = D*b/sqrt(a*a+b*b). A target at normalized coordinates (u,v) therefore has known screen-plane coordinates (u*width,v*height), relative to the chosen screen origin. This supplies metric scale but does not by itself determine camera/TV alignment or pointing direction.
 
-Begin with center plus four corners from the center position; use a nine-point grid if the measured quality warrants more constraints. Repeat from left and right positions and at a different distance, with a different height if that is part of normal use. Record the **controller pose**, not just a label such as "left seat". The user should not need to measure each seating coordinate manually when the pose estimate is observable and valid.
+Present **one target near each of the four TV corners**, one at a time. Start with an inset of 5% of visible width/height: (0.05,0.05), (0.95,0.05), (0.95,0.95), (0.05,0.95). Record the actual target coordinates if the inset is adjusted. Do not silently treat inset targets as the exact physical corners. Keep the complete target visible and account for TV overscan or an incorrectly selected display before recording.
+
+At each target the user aims with the normal two-handed grip, holds still and presses a chosen controller button. Collect approximately 0.5–1 second of synchronized samples when quality is sufficient rather than a single frame; reject excess motion, missing/ambiguous bar geometry, saturation and stale data. Show accepted samples, remaining targets and a redo action. Use robust aggregation and quality weights instead of treating every noisy frame as an independent precise constraint.
+
+Repeat the four-corner sequence from several **controller positions** across the intended usage area: center, left, right and at least one different distance; add near/far or a different height as coverage requires. Prompt the user to translate the controller between rounds, not merely swivel it in place. Small grip/arm movements while aiming are allowed because the actual controller origin is measured for each sample. Record the **controller pose**, not just a label such as "left seat". The user should not need to measure each position manually when the pose estimate is observable and valid.
 
 Fit all accepted samples jointly to estimate the TV plane/camera-to-TV transform and controller pointing alignment. Use robust weighting/outlier rejection and check parameter conditioning. Repeated center targets alone do not supply all the needed constraints. Save the measurement uncertainty and the volume actually covered by calibration.
 
 ### 4. Independent validation
 
-Reserve one position and several target locations from fitting. Ask the user to aim there and report median and 95th-percentile error in pixels and as a fraction of the display diagonal, plus jitter, dropout and uncertainty. Offer "add samples" or redo for a poorly covered region. Do not declare calibration successful on training fit alone.
+Reserve one controller position and use center/interior targets excluded from fitting. Optionally include edge midpoints. Ask the user to aim there and report median and 95th-percentile error in pixels and as a fraction of the display diagonal, plus jitter, dropout and uncertainty. This checks both interior-screen accuracy and generalization to another position. Offer "add samples" or redo for a poorly covered region. Do not declare calibration successful on the four fitted corners alone.
 
 Initial engineering targets can be median <=1% and 95th percentile <=2% of screen diagonal across the tested volume, explicitly provisional until a baseline is measured. Also measure stationary drift, acquisition time and moving-target lag; do not promise a latency bound from the current dequeue timestamps. A useful product should state where accuracy degrades rather than guarantee exact pointing anywhere in the room.
 
@@ -99,7 +109,7 @@ Moving the camera relative to the TV invalidates screen alignment; changing reso
 1. **Capability and synchronized data recorder.** Audit real USB IMU/pose paths, retain DS4Windows ownership, record raw/service pose plus validity, optical geometry and sensor arrival times. Add replay. This is the next implementation task.
 2. **Upstream integration gate.** Demonstrate valid service-native DS4 light-bar pose and existing fusion with the chosen sensor source, or implement the smallest explicit PSMoveServiceEx adapter needed for USB DS4Windows samples. Test coordinate/units conversions and delayed/dropout data before promising fused position/orientation.
 3. **Calibration solver without mouse injection.** Implement pose-to-ray projection, constrained robust calibration fit, persisted versioned artifacts and held-out evaluation. Use synthetic known geometry plus recorded sessions for tests.
-4. **Guided calibration UI.** Reuse/deep-link service camera/color/IMU tooling where applicable; add TV target presentation, normal-grip alignment, multi-position collection and validation. No success state until quality checks pass.
+4. **Guided calibration UI.** Reuse/deep-link service camera/color/IMU tooling where applicable; require TV size/aspect ratio, present four inset corner targets per controller position, collect normal-grip alignment and run separate center/interior/held-out-position validation. No success state until quality checks pass.
 5. **DS4Windows profile and mouse integration.** Save an opt-in mode plus calibration reference, use existing activation/remapping/output, and cover disconnect, profile switching, service restart, lost target, multiple displays and stale callback retirement.
 
 The present lightweight preview remains a diagnostic. A successful calibration file or a centroid following a target is not proof of multi-position pointing accuracy. Keep implementation and hardware-validation results explicit in each contribution.
