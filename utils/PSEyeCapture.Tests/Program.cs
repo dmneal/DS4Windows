@@ -194,3 +194,18 @@ using(var measurementPayload=System.Text.Json.JsonDocument.Parse(TvSurvey.Measur
     Check(root.GetProperty("MeasurementValidated").GetBoolean() && !root.GetProperty("PointingValidated").GetBoolean(),"measurement validation is distinguished from untested pointing accuracy");
 }
 Console.WriteLine($"PASS: {checks} total checks including measurement-only calibration persistence");
+var sceneJson=TvSurvey.MeasurementCalibrationJson(surveyReference,"survey-session.json","DISPLAY1");
+var tvScene=TvSceneCalibration.Parse(sceneJson);
+Check(Vector3.Distance(tvScene.ReferenceInTv,surveyedPoint)<.001,"saved measurement reference becomes tape-measured TV-frame position");
+Check(Math.Abs(Quaternion.Dot(tvScene.ToTvOrientation(refRotation),Quaternion.Identity))>.99999f,"surveyed flat straight-facing attitude becomes identity in TV frame");
+var serviceDelta=Vector3.Transform(new Vector3(.2f,.1f,.3f),refRotation);
+Check(Vector3.Distance(tvScene.ToTvPosition(surveyAnchor+serviceDelta),surveyedPoint+new Vector3(.2f,.1f,.3f))<.001,"live service translation is transformed into TV axes with measured origin");
+Check(Vector3.Distance(tvScene.ScreenCorners[0],new(-surveyWidth/2,surveyHeight/2,0))<.001 && tvScene.ScreenCorners.All(p=>p.Z==0),"TV screen occupies calibrated physical dimensions in Z-zero plane");
+Check(tvScene.MeasurementOnly,"measurement calibration does not require pointing validation to render");
+Throws<System.IO.InvalidDataException>(()=>TvSceneCalibration.Parse(sceneJson.Replace("\"CalibrationComplete\": true","\"CalibrationComplete\": false")),"incomplete calibration cannot orient scene");
+var invalidScene=System.Text.Json.Nodes.JsonNode.Parse(sceneJson)!;invalidScene["Model"]!["Rotation"]!["W"]=10;
+Throws<System.IO.InvalidDataException>(()=>TvSceneCalibration.Parse(invalidScene.ToJsonString()),"nonunit saved rotation rejected rather than distorting scene");
+invalidScene=System.Text.Json.Nodes.JsonNode.Parse(sceneJson)!;invalidScene["Model"]!["Width"]=-1;
+Throws<System.IO.InvalidDataException>(()=>TvSceneCalibration.Parse(invalidScene.ToJsonString()),"invalid saved TV dimensions rejected");
+Check(TvSceneCalibration.Load(Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".json"),out var noCalibration) is null && noCalibration.Contains("No saved"),"missing saved calibration leaves relative view available");
+Console.WriteLine($"PASS: {checks} total checks including calibrated TV scene transforms and validation");

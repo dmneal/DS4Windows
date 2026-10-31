@@ -71,10 +71,16 @@ static class Program
             view.SourceText=$"LIVE PSMoveServiceEx fusion · sequence {last.Sequence} · optical {last.Optical} · tracker mask {last.TrackerMask}";
             view.PositionText=$"Native service position (meters): {last.Position.X:F3}, {last.Position.Y:F3}, {last.Position.Z:F3}";
         } else view.SourceText=source.Status;
+        view.SetTvCalibration(TvSceneCalibration.Load(Path.Combine(AppContext.BaseDirectory,"calibration","tv-calibration.json"),out var calibrationStatus),calibrationStatus);
+        if(view.TvFrameActive && last is not null) {
+            var p=view.TvCalibration!.ToTvPosition(last.Position);
+            view.PositionText=$"TV frame (m): X {p.X:F3}, Y {p.Y:F3}, Z {p.Z:F3}";
+        }
         view.CreateControl(); using var bitmap=new Bitmap(view.Width,view.Height);
         view.DrawToBitmap(bitmap,view.ClientRectangle); bitmap.Save(Path.Combine(AppContext.BaseDirectory,"native-pose-probe.png"),ImageFormat.Png);
         var report=new {Samples=samples.Count,ValidPoses=samples.Count(s=>s.OrientationValid && s.PositionValid),OpticalSamples=samples.Count(s=>s.Optical),OpticalOrientationSamples=samples.Count(s=>s.OpticalOrientationValid),
-            FreshAtCapture=accepted, PositionRmsMm=positionRms,EndToEndRotationDegrees=rotation,Last=last,SourceStatus=source.Status,Recording=stationaryCheck?samples:null};
+            FreshAtCapture=accepted, PositionRmsMm=positionRms,EndToEndRotationDegrees=rotation,Last=last,SourceStatus=source.Status,Recording=stationaryCheck?samples:null,
+            TvFrameActive=view.TvFrameActive,TvCalibrationStatus=view.TvCalibrationStatus,TvPosition=last is not null && view.TvFrameActive?view.TvCalibration!.ToTvPosition(last.Position):(System.Numerics.Vector3?)null};
         File.WriteAllText(Path.Combine(AppContext.BaseDirectory,stationaryCheck?"stationary-pose-check.json":"native-pose-probe.json"),System.Text.Json.JsonSerializer.Serialize(report,new System.Text.Json.JsonSerializerOptions {WriteIndented=true,IncludeFields=true}));
         return accepted?0:1;
     }
@@ -173,7 +179,7 @@ sealed class Preview : Form
     readonly CheckBox diagnosticMotion = new() { Text="Diagnostic DSU attitude only", AutoSize=true };
     readonly NumericUpDown displaySmoothing=new() {Minimum=0,Maximum=150,Value=35,Increment=5,Width=65};
     readonly List<ServicePoseSample> stationary=[];
-    long stationaryStart,displayTime;
+    long stationaryStart,displayTime,tvCalibrationChecked;
     int? displaySequence;
     bool measuring;
     readonly Label qualityStatus=new() {AutoSize=true,Text="Stationary check: hold controller still for 10 seconds."};
@@ -360,6 +366,10 @@ sealed class Preview : Form
         if (bitmap != null) { var old = picture.Image; picture.Image = bitmap; old?.Dispose(); }
         if(!diagnosticMotion.Checked) {
             pose.NativeLightBarOrigin=true;
+            if(tvCalibrationChecked==0 || Stopwatch.GetElapsedTime(tvCalibrationChecked).TotalSeconds>=1) {
+                var calibration=TvSceneCalibration.Load(Path.Combine(AppContext.BaseDirectory,"calibration","tv-calibration.json"),out var calibrationStatus);
+                pose.SetTvCalibration(calibration,calibrationStatus);tvCalibrationChecked=Stopwatch.GetTimestamp();
+            }
             var sample=nativePose.Sample;
             bool fresh=sample?.Fresh==true;
             pose.Tracking=fresh && sample!.OrientationValid;
@@ -390,6 +400,10 @@ sealed class Preview : Form
                 }
             }
             pose.PositionText=pose.PositionTracked?$"Service position (m): X {sample!.Position.X:F3}  Y {sample.Position.Y:F3}  Z {sample.Position.Z:F3} · {(sample.Optical?"optically corrected":"PREDICTED — optical lost")}":"Absolute position unavailable / stale — display anchor only";
+            if(pose.TvFrameActive) {
+                var p=pose.TvCalibration!.ToTvPosition(pose.Position);
+                pose.PositionText=pose.PositionTracked?$"TV frame (m): X {p.X:F3}  Y {p.Y:F3}  Z {p.Z:F3} - {(sample!.Optical?"camera-estimated movement":"predicted; optical lost")}":"Position stale / unavailable - box shown at surveyed reference, not a live position";
+            }
             attitudeStatus.Text="Native fusion — tune/calibrate in Fusion / tuning";
             pose.AccessibleName=pose.SourceText+" · "+pose.PositionText;
             pose.Invalidate(); return;
