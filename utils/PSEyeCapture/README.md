@@ -30,7 +30,7 @@ The helper follows the SDK lifecycle: `PSM_Initialize`, `PSM_GetTrackerList`, `P
 
 `pseye-capture.exe --list` queries the real service and reports trackers to stderr (exit 4 for none). The service endpoint is fixed to loopback port 9512 because SDK video uses local shared memory. No camera or DS4 devices are opened directly by this adapter.
 
-`pseye-capture.exe --pose-audit` queries service controllers and, when a public DS4 exists, measures pose/validity/IMU stream state for two seconds. JSON goes to stdout; diagnostics go to stderr. On this USB setup the SDK excludes the DS4 from its public list. Exit 0 means the audit completed, not that valid fused pose was available. Run from the service working directory.
+`pseye-capture.exe --pose-audit` queries service controllers and, when a public DS4 exists, measures pose/validity/IMU stream state for ten seconds. JSON goes to stdout; diagnostics go to stderr. On USB the SDK excludes the DS4 from its public list. On Bluetooth, after scene color calibration, the live audit obtained 641 valid optically tracked poses from 646 fresh states. See the fusion audit for settings and limitations. Exit 0 means the audit completed, not that valid fused pose was available. Run from the service working directory.
 
 `PSEyeCapture.exe --synthetic` previews a simulated purple rectangle after Start. `PSEyeCapture.exe --self-test` consumes eight synthetic native frames headlessly, writes `self-test.txt` and exits with 0 on success. These modes do not connect to the service or access a camera, and do not prove that hardware capture works.
 

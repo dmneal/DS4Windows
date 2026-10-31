@@ -84,7 +84,7 @@ static int audit_pose(Api& api) {
     int lastSequence=-1; double firstSensor=-1,lastSensor=-1;
     auto begun=std::chrono::steady_clock::now();
     if(start==PSMResult_Success) {
-        while(std::chrono::steady_clock::now()-begun<std::chrono::seconds(2)) {
+        while(std::chrono::steady_clock::now()-begun<std::chrono::seconds(10)) {
             if(api.PSM_Update()!=PSMResult_Success) break;
             const auto* c=api.PSM_GetController(id);
             if(c && c->ControllerType==PSMController_DualShock4 && c->IsConnected && c->bValid &&
@@ -108,14 +108,16 @@ static int audit_pose(Api& api) {
     char json[2048];
     std::snprintf(json,sizeof(json),
         "{\"ControllerFound\":true,\"ControllerId\":%d,\"Connection\":\"%s\",\"StreamStartResult\":%d,"
-        "\"ObservationSeconds\":2,\"FreshStateFrames\":%d,\"ValidPoseFrames\":%d,\"OpticallyTrackedFrames\":%d,"
+        "\"ObservationSeconds\":10,\"FreshStateFrames\":%d,\"ValidPoseFrames\":%d,\"OpticallyTrackedFrames\":%d,"
         "\"OrientationValidFrames\":%d,\"PositionValidFrames\":%d,\"LastPoseGetterResult\":%d,"
         "\"LastOrientationValid\":%s,\"LastPositionValid\":%s,\"LastOpticallyTracking\":%s,"
-        "\"SensorClockAdvanced\":%s,\"RawTrackerMask\":%u,\"CrossButtonState\":%d}\n",
-        id,ds4 && s.ConnectionType==PSMConnectionType_USB?"USB":"Bluetooth/unknown",(int)start,
+        "\"SensorClockAdvanced\":%s,\"RawTrackerMask\":%u,\"CrossButtonState\":%d,"
+        "\"TrackingEnabled\":%s,\"TrackingColor\":%d}\n",
+        id,ds4 && s.ConnectionType==PSMConnectionType_USB?"USB":ds4 && s.ConnectionType==PSMConnectionType_BLUETOOTH?"Bluetooth":"Unknown",(int)start,
         freshFrames,validPoses,trackedFrames,orientationFrames,positionFrames,(int)poseResult,
         s.bIsOrientationValid?"true":"false",s.bIsPositionValid?"true":"false",s.bIsCurrentlyTracking?"true":"false",
-        firstSensor>=0 && lastSensor>firstSensor?"true":"false",s.RawTrackerData.ValidTrackerBitmask,(int)s.CrossButton);
+        firstSensor>=0 && lastSensor>firstSensor?"true":"false",s.RawTrackerData.ValidTrackerBitmask,(int)s.CrossButton,
+        s.bIsTrackingEnabled?"true":"false",(int)s.TrackingColorType);
     write_all(json,std::strlen(json));
     if(start==PSMResult_Success) api.PSM_StopControllerDataStream(id,1000);
     api.PSM_FreeControllerListener(id);
