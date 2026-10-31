@@ -223,6 +223,7 @@ sealed class Preview : Form
         Shown+=(_,_)=>cameraLayout.SplitterDistance=Math.Max(100,cameraLayout.Width-460);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
         var tvTab=new TabPage("TV calibration"); tvTab.Controls.Add(new TvCalibrationPanel(nativePose)); tabs.TabPages.Add(tvTab);
+        var gyroTab=new TabPage("Gyro calibration"); gyroTab.Controls.Add(new GyroCalibrationPanel(()=>serviceFolder.Text)); tabs.TabPages.Add(gyroTab);
         var fusionTab=new TabPage("Fusion / tuning");
         var tuning=new TextBox { Dock=DockStyle.Fill,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Both,WordWrap=false,Font=new Font("Consolas",10) };
         var tuningTools=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true };

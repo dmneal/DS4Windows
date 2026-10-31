@@ -25,7 +25,7 @@ jobs:
       - name: Apply pinned native fixes
         shell: pwsh
         run: |
-          git -C .pseye-service-source submodule update --init --depth 1 thirdparty/eigen thirdparty/protobuf thirdparty/imgui thirdparty/PS3EYEDriver thirdparty/libstem_gamepad
+          git -C .pseye-service-source submodule update --init --depth 1 thirdparty/eigen thirdparty/glm thirdparty/protobuf thirdparty/imgui thirdparty/PS3EYEDriver thirdparty/libstem_gamepad
           if ($LASTEXITCODE -ne 0) { throw 'Pinned source initialization failed' }
           python utils/PSMoveServiceExFixes/apply-patches.py .pseye-service-source
           if ($LASTEXITCODE -ne 0) { throw 'Native fixes did not apply' }

@@ -9,7 +9,7 @@ This is a patch bundle against **v0.27.8, commit `308cb9ea55dc1ed32b2c0d60e63d73
 - Preserve independent optical orientation validity through the internal filter packet. Both complementary and optical-only DS4 orientation filters reject position-only packets rather than blending toward an invented identity rotation. Position tracking can continue independently.
 - Align quaternion hemispheres before normalized interpolation, including antipodal equivalent rotations and wraparound near 360 degrees.
 
-No EKF, new heading-only filter, automatic stationary lock, or TV alignment is introduced. Bluetooth DS4 is tested; the earlier USB fusion limitation remains.
+The optional stationary gyro-bias learner is described in [AUTO_CALIBRATION.md](AUTO_CALIBRATION.md). It adjusts sensor bias, not the displayed pose or a stationary lock. No new EKF, heading-only filter, or TV alignment is introduced. Bluetooth DS4 is tested; the earlier USB fusion limitation remains.
 
 ## Apply and test
 
