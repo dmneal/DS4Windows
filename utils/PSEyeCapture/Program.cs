@@ -157,6 +157,7 @@ static class Program
 sealed class Preview : Form
 {
     readonly ServicePose nativePose = new();
+    readonly Label opticalReadout=new() {Dock=DockStyle.Top,AutoSize=true,MaximumSize=new Size(440,0),Padding=new Padding(8),Font=new Font("Consolas",10)};
     readonly CheckBox diagnosticMotion = new() { Text="Diagnostic DSU attitude only", AutoSize=true };
     readonly NumericUpDown displaySmoothing=new() {Minimum=0,Maximum=150,Value=35,Increment=5,Width=65};
     readonly List<ServicePoseSample> stationary=[];
@@ -214,7 +215,12 @@ sealed class Preview : Form
         measure.Click+=(_,_)=> {stationary.Clear(); stationaryStart=Stopwatch.GetTimestamp(); measuring=true;};
         poseTools.Controls.AddRange([new Label {Text="Display smoothing ms (raw pose used for calibration)",AutoSize=true},displaySmoothing,measure,qualityStatus]);
         poseTab.Controls.Add(pose); poseTab.Controls.Add(poseTools);
-        cameraTab.Controls.Add(picture);
+        var cameraLayout=new SplitContainer {Dock=DockStyle.Fill,Size=new Size(1000,600),FixedPanel=FixedPanel.Panel2,Panel2MinSize=330};
+        cameraLayout.Panel1.Controls.Add(picture); cameraLayout.Panel2.Controls.Add(opticalReadout);
+        cameraLayout.Panel2.AutoScroll=true;
+        cameraLayout.Panel2.Resize+=(_,_)=>opticalReadout.MaximumSize=new Size(Math.Max(200,cameraLayout.Panel2.ClientSize.Width-24),0);
+        cameraTab.Controls.Add(cameraLayout);
+        Shown+=(_,_)=>cameraLayout.SplitterDistance=Math.Max(100,cameraLayout.Width-460);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
         var tvTab=new TabPage("TV calibration"); tvTab.Controls.Add(new TvCalibrationPanel(nativePose)); tabs.TabPages.Add(tvTab);
         var fusionTab=new TabPage("Fusion / tuning");
@@ -299,6 +305,7 @@ sealed class Preview : Form
     }
     void RefreshPreview()
     {
+        opticalReadout.Text=CameraEstimates.Describe(nativePose.Sample);
         Bitmap? bitmap = null;
         lock (sync)
         {

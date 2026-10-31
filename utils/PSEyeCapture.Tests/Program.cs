@@ -140,3 +140,12 @@ Check(flat.Project(new(0,0,1),Quaternion.Identity)==new Vector2(.5f,.5f),"forwar
 Check(flat.Project(new(0,0,-1),Quaternion.Identity)==null,"intersection behind ray rejected");
 Check(flat.Project(new(0,0,1),Quaternion.CreateFromAxisAngle(Vector3.UnitY,MathF.PI/2))==null,"parallel ray rejected");
 Console.WriteLine($"PASS: {checks} total checks including TV calibration and held-out geometry");
+var cameraSample=ServicePoseSample.Parse(nativeJson[..^1]+""", "OpticalPositionValid":true,"OpticalOrientationValid":true,"OpticalPosition":[1,2,3],"OpticalQuaternion":[0,0,0,1],"CameraPosition":[0.1,0.2,0.7],"CameraQuaternion":[0,0,0,1],"CameraPixel":[120,240],"TrackerId":0}""") with {Optical=true};
+Check(cameraSample.OpticalPosition==new Vector3(1,2,3) && cameraSample.CameraPosition==new Vector3(.1f,.2f,.7f),"optical and camera positions remain distinct from fused position");
+Check(cameraSample.CameraOrientation==Quaternion.Identity && cameraSample.CameraPixel==new Vector2(120,240),"camera quaternion and pixel centroid decode");
+Check(CameraEstimates.HasCameraPosition(cameraSample) && !CameraEstimates.HasCameraPosition(cameraSample with {OpticalPositionValid=false}),"camera depth gated by optical position validity");
+Check(!CameraEstimates.HasCameraPosition(cameraSample with {TrackerMask=0}),"missing camera observation rejects depth");
+Check(CameraEstimates.Describe(cameraSample with {OpticalOrientationValid=false}).Contains("Unavailable / rejected"),"rejected optical orientation labelled");
+Check(CameraEstimates.Describe(cameraSample with {Received=0}).Contains("Unavailable / stale"),"stale optical values hidden");
+Check(Vector3.Distance(CameraEstimates.Degrees(Quaternion.CreateFromYawPitchRoll(.3f,.2f,.1f)),new Vector3(.3f,.2f,.1f)*180/MathF.PI)<.001,"optical Euler angle convention matches Y X Z rotation");
+Console.WriteLine($"PASS: {checks} total checks including camera-only telemetry");

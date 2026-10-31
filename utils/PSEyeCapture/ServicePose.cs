@@ -11,6 +11,23 @@ record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, 
     public bool CrossDown {get;init;}
     public bool OpticalOrientationValid {get;init;}
     public bool OpticalPositionValid {get;init;}
+    public Vector3? OpticalPosition {get;init;}
+    public Quaternion? OpticalOrientation {get;init;}
+    public Vector3? CameraPosition {get;init;}
+    public Quaternion? CameraOrientation {get;init;}
+    public Vector2? CameraPixel {get;init;}
+    public int TrackerId {get;init;}=-1;
+    static float[]? Numbers(JsonElement r,string name,int count) {
+        if(!r.TryGetProperty(name,out var a) || a.ValueKind!=JsonValueKind.Array) return null;
+        var values=a.EnumerateArray().Select(x=>x.GetSingle()).ToArray();
+        return values.Length==count && values.All(float.IsFinite)?values:null;
+    }
+    static Vector3? Vector(JsonElement r,string name) => Numbers(r,name,3) is {} a?new(a[0],a[1],a[2]):null;
+    static Quaternion? Rotation(JsonElement r,string name) {
+        if(Numbers(r,name,4) is not {} a) return null;
+        var q=new Quaternion(a[0],a[1],a[2],a[3]);
+        return q.LengthSquared() is >.5f and <1.5f?Quaternion.Normalize(q):null;
+    }
     public bool Fresh => Stopwatch.GetElapsedTime(Received).TotalMilliseconds < 250;
     public static ServicePoseSample Parse(string line)
     {
@@ -26,7 +43,11 @@ record ServicePoseSample(int Sequence, int ControllerId, bool OrientationValid, 
             r.GetProperty("Optical").GetBoolean(),r.GetProperty("TrackerMask").GetUInt32(),new(p[0],p[1],p[2]),Quaternion.Normalize(orientation),Stopwatch.GetTimestamp()) {
                 CrossDown=r.TryGetProperty("CrossDown",out var cross) && cross.GetBoolean(),
                 OpticalOrientationValid=r.TryGetProperty("OpticalOrientationValid",out var oo) && oo.GetBoolean(),
-                OpticalPositionValid=r.TryGetProperty("OpticalPositionValid",out var op) && op.GetBoolean() };
+                OpticalPositionValid=r.TryGetProperty("OpticalPositionValid",out var op) && op.GetBoolean(),
+                OpticalPosition=Vector(r,"OpticalPosition"), OpticalOrientation=Rotation(r,"OpticalQuaternion"),
+                CameraPosition=Vector(r,"CameraPosition"), CameraOrientation=Rotation(r,"CameraQuaternion"),
+                CameraPixel=Numbers(r,"CameraPixel",2) is {} pixel?new(pixel[0],pixel[1]):null,
+                TrackerId=r.TryGetProperty("TrackerId",out var tracker)?tracker.GetInt32():-1 };
     }
 }
 
