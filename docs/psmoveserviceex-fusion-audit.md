@@ -10,7 +10,7 @@ After the camera was unplugged/replugged, the service still advertised a tracker
 
 The default magenta threshold rejected the actual bar: measured OpenCV-style hue averaged 144/180, saturation 126/255, and value 191/255 in the visible bar, while the default saturation minimum was 223. A backed-up local configuration was adjusted to 60 Hz, exposure 8, gain 32, and magenta H=144±16, S=160±80, V=170±85. The broad diagnostic detector then saw the bar in 120/120 frames at 59.2 fps; the subsequent native pose audit succeeded. These are scene-specific color settings, not camera intrinsic calibration or universal defaults.
 
-`SensorClockAdvanced` remained false even while network state sequences and valid optical poses advanced. Do not use that field alone as a freshness gate; investigate SDK sensor timestamp population before time synchronization work. The GUI still uses its diagnostic DSU attitude provider: consuming native pose in the renderer is the next implementation step.
+`SensorClockAdvanced` remained false even while network state sequences and valid optical poses advanced. Do not use that field alone as a freshness gate; investigate SDK sensor timestamp population before time synchronization work. The GUI now consumes native position/quaternion by default through the C API adapter. A live end-to-end probe recorded 180/180 valid, optically tracked poses and rendered the final pose. DSU attitude is an explicit diagnostic alternative.
 
 ## Components to reuse
 
@@ -68,4 +68,4 @@ Built-in fusion does not guarantee drift-free tracking: calibration, optical vis
 
 Define a pose-sample contract with identity/transport, source timing and sequence, meters, a documented quaternion frame, independent validity and confidence. Resolve wired access into the **existing** service pipeline, then feed its accepted pose directly to the 3D view without filtering it again. Build multi-position TV calibration and mouse mapping on that contract. The external-orientation pipe is not automatically a raw-IMU fusion bridge.
 
-The audit now verifies working native Bluetooth fusion. The USB service bridge and fused-pose renderer input are not yet implemented.
+The audit and native Bluetooth fused-pose renderer are implemented. The USB service bridge, physical axis validation and TV pointing calibration remain pending.

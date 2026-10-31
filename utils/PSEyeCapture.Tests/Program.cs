@@ -109,4 +109,11 @@ BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(8),MotionProtocol.Crc(pac
 Check(MotionProtocol.Parse(packet) is {Connection:1,PitchYawRoll.Y:45},"DSU axes and transport decode");
 packet[92]^=1; Check(MotionProtocol.Parse(packet)==null,"corrupt motion packet rejected");
 Check(MotionProtocol.Parse(new byte[50])==null,"truncated motion packet rejected");
+const string nativeJson="""{"Sequence":7,"ControllerId":0,"OrientationValid":true,"PositionValid":true,"Optical":false,"TrackerMask":1,"Position":[0.1,-0.2,0.7],"Quaternion":[0,0,0,1]}""";
+var native=ServicePoseSample.Parse(nativeJson);
+Check(native.Position==new Vector3(.1f,-.2f,.7f) && native.Orientation==Quaternion.Identity,"native meters and XYZW quaternion survive bridge");
+Check(native.OrientationValid && native.PositionValid && !native.Optical,"predicted pose is distinct from current optical observation");
+Check(native.Fresh && !(native with {Received=System.Diagnostics.Stopwatch.GetTimestamp()-System.Diagnostics.Stopwatch.Frequency}).Fresh,"native receipt timeout rejects frozen stream");
+Throws<InvalidDataException>(()=>ServicePoseSample.Parse(nativeJson.Replace("[0,0,0,1]","[0,0,0,0]")),"zero quaternion rejected");
+Throws<InvalidDataException>(()=>ServicePoseSample.Parse(nativeJson.Replace("[0.1,-0.2,0.7]","[0.1]")),"malformed native position rejected");
 Console.WriteLine($"PASS: {checks} total tracking, attitude, transport and 3D geometry checks");

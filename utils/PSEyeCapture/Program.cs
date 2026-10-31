@@ -12,6 +12,7 @@ static class Program
     {
         int directoryIndex = Array.IndexOf(args, "--service-dir");
         string serviceDirectory = directoryIndex >= 0 && directoryIndex + 1 < args.Length ? args[directoryIndex + 1] : FindServiceDirectory();
+        if(args.Contains("--native-pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode=NativePoseProbe(serviceDirectory); return; }
         if (args.Contains("--pose-probe")) { ApplicationConfiguration.Initialize(); Environment.ExitCode = PoseProbe(); return; }
         if (args.Contains("--probe")) { Environment.ExitCode = LiveProbe(serviceDirectory).GetAwaiter().GetResult(); return; }
         if (args.Contains("--self-test")) { Environment.ExitCode = SelfTest().GetAwaiter().GetResult(); return; }
@@ -39,6 +40,32 @@ static class Program
             AbsolutePositionTracked=false, YawOpticallyAnchored=false, motion.Error
         },new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
         return snapshot.Fresh ? 0 : 1;
+    }
+    static int NativePoseProbe(string directory)
+    {
+        using var source=new ServicePose(); source.Start(directory);
+        var samples=new List<ServicePoseSample>(); int? sequence=null;
+        var started=Stopwatch.StartNew();
+        while(started.Elapsed.TotalSeconds<8 && samples.Count<180) {
+            var s=source.Sample;
+            if(s is not null && s.Sequence!=sequence) { samples.Add(s); sequence=s.Sequence; }
+            Thread.Sleep(5);
+        }
+        var last=samples.LastOrDefault();
+        bool accepted=last is {Fresh:true,OrientationValid:true,PositionValid:true};
+        using var view=new PoseViewport {Size=new Size(1200,800)};
+        if(last is not null) {
+            view.Orientation=last.Orientation; view.Position=last.Position; view.NativeLightBarOrigin=true;
+            view.Tracking=last.Fresh && last.OrientationValid; view.PositionTracked=last.Fresh && last.PositionValid;
+            view.SourceText=$"LIVE PSMoveServiceEx fusion · sequence {last.Sequence} · optical {last.Optical} · tracker mask {last.TrackerMask}";
+            view.PositionText=$"Native service position (meters): {last.Position.X:F3}, {last.Position.Y:F3}, {last.Position.Z:F3}";
+        } else view.SourceText=source.Status;
+        view.CreateControl(); using var bitmap=new Bitmap(view.Width,view.Height);
+        view.DrawToBitmap(bitmap,view.ClientRectangle); bitmap.Save(Path.Combine(AppContext.BaseDirectory,"native-pose-probe.png"),ImageFormat.Png);
+        var report=new {Samples=samples.Count,ValidPoses=samples.Count(s=>s.OrientationValid && s.PositionValid),OpticalSamples=samples.Count(s=>s.Optical),
+            FreshAtCapture=accepted, Last=last,SourceStatus=source.Status};
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"native-pose-probe.json"),System.Text.Json.JsonSerializer.Serialize(report,new System.Text.Json.JsonSerializerOptions {WriteIndented=true,IncludeFields=true}));
+        return accepted?0:1;
     }
     static string FindServiceDirectory()
     {
@@ -125,6 +152,8 @@ static class Program
 
 sealed class Preview : Form
 {
+    readonly ServicePose nativePose = new();
+    readonly CheckBox diagnosticMotion = new() { Text="Diagnostic DSU attitude only", AutoSize=true };
     readonly ControllerMotion motion = new();
     readonly PoseViewport pose = new() { Dock = DockStyle.Fill };
     readonly Label attitudeStatus = new() { AutoSize = true };
@@ -163,19 +192,40 @@ sealed class Preview : Form
         var cameraTab = new TabPage("Camera tracking");
         var poseTools = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
         var forward = new Button { Text = "Set forward", AutoSize = true };
-        forward.Click += (_,_) => motion.Attitude.SetForward();
+        forward.Click += (_,_) => { if(diagnosticMotion.Checked) motion.Attitude.SetForward(); };
         var bias = new Button { Text = "Measure gyro bias (keep still)", AutoSize = true };
-        bias.Click += (_,_) => motion.Attitude.BeginBiasCalibration();
+        bias.Click += (_,_) => { if(diagnosticMotion.Checked) motion.Attitude.BeginBiasCalibration(); };
         var resetView = new Button { Text = "Reset view", AutoSize = true };
         resetView.Click += (_,_) => pose.ResetView();
-        poseTools.Controls.AddRange([forward,bias,resetView,attitudeStatus]);
+        forward.Enabled=bias.Enabled=false;
+        diagnosticMotion.CheckedChanged += (_,_) => { forward.Enabled=bias.Enabled=diagnosticMotion.Checked; pose.ResetView(); };
+        poseTools.Controls.AddRange([diagnosticMotion,forward,bias,resetView,attitudeStatus]);
         poseTab.Controls.Add(pose); poseTab.Controls.Add(poseTools);
         cameraTab.Controls.Add(picture);
         tabs.TabPages.AddRange([poseTab,cameraTab]);
+        var fusionTab=new TabPage("Fusion / tuning");
+        var tuning=new TextBox { Dock=DockStyle.Fill,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Both,WordWrap=false,Font=new Font("Consolas",10) };
+        var tuningTools=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true };
+        var refreshSettings=new Button { Text="Read service settings",AutoSize=true };
+        void ReadSettings() {
+            string config=Path.GetFullPath(Path.Combine(serviceFolder.Text,"..","..","data","PSMoveService"));
+            tuning.Text="POSE SOURCE: PSMoveServiceEx native C API → meters + quaternion XYZW → renderer\r\nNo second fusion filter is applied. DSU mode is an explicit diagnostic alternative.\r\n\r\nPIPELINE\r\nPS Eye color segmentation → DS4 light-bar triangle/quad fit → solvePnP → optical pose\r\nIMU → Madgwick ARG → quality-weighted optical quaternion correction\r\nOptical position → variance-based smoothing → optional IMU prediction\r\n\r\nVALIDITY\r\n250 ms receipt timeout; orientation, position and current optical visibility are separate.\r\nGray box = orientation stale/invalid. Predicted position is labelled when optical is lost.\r\nService sensor timestamp is not trusted; advancing network sequence gates receipt freshness.\r\nPosition labels use service coordinates; scene origin is the first tracked location. Reset view recenters.\r\nTV alignment and pointing-axis calibration are still pending.\r\n\r\nTUNING\r\nExposure/gain: keep bar colored, avoid white clipping; verify Camera tracking tab.\r\nHSV threshold: fit the real bar; avoid reflections. Current scene was H144±16 S160±80 V170±85.\r\nFrame rate: 60 Hz delivered ~59 fps; higher requests must be measured.\r\nPrediction time: reduce for overshoot, increase cautiously for latency.\r\nOptical smoothing: trades jitter against lag. Measure movement before changing.\r\nDS4 planar optical orientation is rejected beyond about ±30° yaw/pitch upstream.\r\nCamera intrinsics, gyro calibration and TV calibration are distinct procedures.\r\nUse upstream Config Tool for device calibration. Restart capture after closing its test stages.\r\n\r\nLOCAL PERSISTED CONFIG (not a live settings acknowledgement)\r\n"+config+"\r\n";
+            if(Directory.Exists(config)) foreach(var file in Directory.GetFiles(config,"*.json").Where(f=>Path.GetFileName(f).StartsWith("dualshock4_") || (Path.GetFileName(f).StartsWith("PS3EyeTrackerConfig_") && !f.Contains("before"))))
+                tuning.AppendText("\r\n"+Path.GetFileName(file)+"\r\n"+File.ReadAllText(file)+"\r\n");
+            else tuning.AppendText("\r\nConfig directory unavailable. Use the Config Tool for this service instance.");
+        }
+        refreshSettings.Click+=(_,_)=>ReadSettings();
+        var configTool=new Button {Text="Open upstream Config Tool",AutoSize=true};
+        configTool.Click+=(_,_)=> {
+            try { var info=new ProcessStartInfo(Path.Combine(serviceFolder.Text,"PSMoveConfigTool.exe")) {UseShellExecute=false,WorkingDirectory=serviceFolder.Text}; Process.Start(info); }
+            catch(Exception ex) { status.Text=ex.Message; }
+        };
+        tuningTools.Controls.AddRange([refreshSettings,configTool]); fusionTab.Controls.Add(tuning); fusionTab.Controls.Add(tuningTools); tabs.TabPages.Add(fusionTab);
+        ReadSettings();
         Controls.Add(tabs); Controls.Add(bar);
         timer.Tick += (_, _) => RefreshPreview(); timer.Start();
         if (autoStart) Shown += (_, _) => StartCapture();
-        FormClosing += (_, _) => { stop?.Cancel(); KillHelper(); };
+        FormClosing += (_, _) => { stop?.Cancel(); KillHelper(); nativePose.Dispose(); };
         FormClosed += (_, _) => { timer.Dispose(); picture.Image?.Dispose(); motion.Dispose(); };
     }
     void StartCapture()
@@ -185,6 +235,7 @@ sealed class Preview : Form
         var info = new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         if (!Directory.Exists(serviceFolder.Text)) { status.Text = "Select PSMoveServiceEx's working directory (containing shared_mem)."; return; }
         info.WorkingDirectory = Path.GetFullPath(serviceFolder.Text);
+        if(!synthetic) nativePose.Start(info.WorkingDirectory);
         foreach (string arg in new[] { "--camera", camera.Value.ToString() }) info.ArgumentList.Add(arg);
         if (synthetic) info.ArgumentList.Add("--synthetic");
         stop = new(); var token = stop.Token;
@@ -226,6 +277,7 @@ sealed class Preview : Form
     void KillHelper() { try { if (helper is { HasExited: false }) helper.Kill(); } catch (InvalidOperationException) { } }
     async Task StopCapture()
     {
+        nativePose.Dispose();
         stop?.Cancel(); KillHelper();
         if (reader != null) await reader;
         helper?.Dispose(); helper = null; reader = null; stop?.Dispose(); stop = null;
@@ -254,7 +306,22 @@ sealed class Preview : Form
             }
         }
         if (bitmap != null) { var old = picture.Image; picture.Image = bitmap; old?.Dispose(); }
+        if(!diagnosticMotion.Checked) {
+            pose.NativeLightBarOrigin=true;
+            var sample=nativePose.Sample;
+            bool fresh=sample?.Fresh==true;
+            pose.Tracking=fresh && sample!.OrientationValid;
+            pose.PositionTracked=fresh && sample!.PositionValid;
+            if(pose.Tracking) pose.Orientation=sample!.Orientation;
+            if(pose.PositionTracked) pose.Position=sample!.Position;
+            pose.SourceText=sample is null?nativePose.Status:
+                $"PSMoveServiceEx native fusion · DS4 {sample.ControllerId} · sequence {sample.Sequence} · received {Stopwatch.GetElapsedTime(sample.Received).TotalMilliseconds:F0} ms ago\nOrientation: {(fresh && sample.OrientationValid?"valid":"stale / invalid")} · position: {(fresh && sample.PositionValid?"valid":"stale / invalid")} · optical: {(fresh && sample.Optical?"visible":"LOST")} · tracker mask {sample.TrackerMask}";
+            pose.PositionText=pose.PositionTracked?$"Service position (m): X {sample!.Position.X:F3}  Y {sample.Position.Y:F3}  Z {sample.Position.Z:F3} · {(sample.Optical?"optically corrected":"PREDICTED — optical lost")}":"Absolute position unavailable / stale — display anchor only";
+            attitudeStatus.Text="Native fusion — tune/calibrate in Fusion / tuning";
+            pose.Invalidate(); return;
+        }
         var attitude = motion.Attitude.Snapshot(Stopwatch.GetTimestamp(),Stopwatch.Frequency);
+        pose.NativeLightBarOrigin=false; pose.PositionTracked=false; pose.PositionText="Diagnostic IMU only — absolute position UNTRACKED";
         pose.Orientation = attitude.Orientation; pose.Tracking = attitude.Fresh;
         string connection = attitude.Connection == 1 ? "USB wired" : attitude.Connection == 2 ? "Bluetooth (not validated)" : "unknown connection";
         pose.SourceText = attitude.Fresh ? $"Live {connection} IMU attitude · gravity-aided tilt · relative yaw\nOptical orientation fusion and absolute 3D position are not connected yet." :

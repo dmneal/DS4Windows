@@ -9,6 +9,11 @@ sealed class PoseViewport : Control
 {
     public Quaternion Orientation { get; set; } = Quaternion.Identity;
     public bool Tracking { get; set; }
+    public Vector3 Position { get; set; }
+    public bool PositionTracked { get; set; }
+    public bool NativeLightBarOrigin { get; set; }
+    Vector3? anchor;
+    public string PositionText { get; set; } = "Absolute position: UNTRACKED — box is at a display anchor";
     public string SourceText { get; set; } = "Waiting for DS4Windows motion data";
     float azimuth = 0.55f, elevation = 0.38f, distance = 0.48f;
     Point? drag;
@@ -20,7 +25,7 @@ sealed class PoseViewport : Control
         MouseMove += (_,e) => { if(drag is {} p) { azimuth += (e.X-p.X)*0.008f; elevation = Math.Clamp(elevation+(e.Y-p.Y)*0.008f,-0.2f,1.3f); drag=e.Location; Invalidate(); } };
         MouseWheel += (_,e) => { distance = Math.Clamp(distance-e.Delta*0.0003f,0.22f,1.5f); Invalidate(); };
     }
-    public void ResetView() { azimuth=0.55f; elevation=0.38f; distance=0.48f; Invalidate(); }
+    public void ResetView() { azimuth=0.55f; elevation=0.38f; distance=0.8f; anchor=PositionTracked?Position:null; Invalidate(); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e); var g=e.Graphics; g.SmoothingMode=SmoothingMode.AntiAlias;
@@ -30,7 +35,8 @@ sealed class PoseViewport : Control
         var projection=Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI/4,Width/(float)Height,0.01f,5);
         PointF Project(Vector3 p) {
             var clip=Vector4.Transform(new Vector4(p,1),view*projection);
-            return new PointF(Width*(0.5f+0.5f*clip.X/clip.W),Height*(0.54f-0.5f*clip.Y/clip.W));
+            float w=MathF.Max(.01f,clip.W);
+            return new PointF(Math.Clamp(Width*(0.5f+0.5f*clip.X/w),-50000,50000),Math.Clamp(Height*(0.54f-0.5f*clip.Y/w),-50000,50000));
         }
         void Line(Vector3 a,Vector3 b,Color color,float thickness=1,bool arrow=false) {
             using var pen=new Pen(color,thickness); if(arrow) pen.CustomEndCap=new AdjustableArrowCap(3,4);
@@ -45,7 +51,11 @@ sealed class PoseViewport : Control
         Line(origin,origin+Vector3.UnitX*0.07f,Color.Tomato,2,true);
         Line(origin,origin+Vector3.UnitY*0.07f,Color.LightGreen,2,true);
         Line(origin,origin+Vector3.UnitZ*0.07f,Color.CornflowerBlue,2,true);
-        var corners=PoseGeometry.Corners(Orientation,Vector3.Zero);
+        if(PositionTracked && anchor is null) anchor=Position;
+        var translation=PositionTracked?Position-(anchor??Position):Vector3.Zero;
+        // Upstream DS4 pose origin is the light-bar center, not the bounding-box center.
+        if(NativeLightBarOrigin) translation+=Vector3.Transform(new Vector3(0,-.017f,.0495f),Orientation);
+        var corners=PoseGeometry.Corners(Orientation,translation);
         int[][] faces=[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]];
         Color[] colors=[Color.FromArgb(48,74,114),Color.FromArgb(36,48,70),Color.FromArgb(27,38,58),Color.FromArgb(77,105,146),Color.FromArgb(45,64,95),Color.FromArgb(61,83,118)];
         foreach(int face in Enumerable.Range(0,6).OrderBy(i=>faces[i].Average(j=>Vector3.Transform(corners[j],view).Z))) {
@@ -55,7 +65,7 @@ sealed class PoseViewport : Control
             if(!Tracking) outline.DashStyle=DashStyle.Dash;
             g.FillPolygon(fill,polygon); g.DrawPolygon(outline,polygon);
         }
-        Vector3 Body(Vector3 p)=>Vector3.Transform(p,Orientation);
+        Vector3 Body(Vector3 p)=>Vector3.Transform(p,Orientation)+translation;
         var bar=new[]{new Vector3(-.026f,.012f,-.0495f),new Vector3(.026f,.012f,-.0495f),new Vector3(.026f,.022f,-.0495f),new Vector3(-.026f,.022f,-.0495f)};
         using(var magenta=new SolidBrush(Color.Magenta)) g.FillPolygon(magenta,bar.Select(p=>Project(Body(p))).ToArray());
         Line(Body(new(0,0,-.05f)),Body(new(0,0,-.15f)),Color.Cyan,2.5f,true);
@@ -65,7 +75,7 @@ sealed class PoseViewport : Control
         g.DrawString("Controller pose check",title,text,18,16);
         g.DrawString(SourceText,Font,Tracking?text:muted,new RectangleF(18,48,Width-36,60));
         g.DrawString("Box: 162 × 52 × 98 mm  ·  magenta = light-bar edge  ·  cyan = forward",Font,muted,18,Height-76);
-        g.DrawString("Absolute position: UNTRACKED — box is at a display anchor",Font,text,18,Height-52);
+        g.DrawString(PositionText,Font,text,18,Height-52);
         g.DrawString("Drag to orbit  ·  wheel to zoom  ·  world axes: X red / Y green / Z blue",Font,muted,18,Height-28);
     }
 }

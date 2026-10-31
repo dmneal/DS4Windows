@@ -10,5 +10,6 @@
     <Compile Include="../PSEyeCapture/FrameProtocol.cs" Link="FrameProtocol.cs" />
     <Compile Include="../PSEyeCapture/ControllerMotion.cs" Link="ControllerMotion.cs" />
     <Compile Include="../PSEyeCapture/PoseGeometry.cs" Link="PoseGeometry.cs" />
+    <Compile Include="../PSEyeCapture/ServicePose.cs" Link="ServicePose.cs" />
   </ItemGroup>
 </Project>
