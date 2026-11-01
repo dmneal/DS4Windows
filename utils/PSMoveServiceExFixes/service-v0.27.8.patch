@@ -167,7 +167,7 @@ index f5f6b15..6644154 100644
  #define APP_STAGE_COLOR_CALIBRATION_H
  
 diff --git a/src/psmoveconfigtool/AppStage_ControllerSettings.cpp b/src/psmoveconfigtool/AppStage_ControllerSettings.cpp
-index 82e499a..3f3692b 100644
+index 82e499a..8c197af 100644
 --- a/src/psmoveconfigtool/AppStage_ControllerSettings.cpp
 +++ b/src/psmoveconfigtool/AppStage_ControllerSettings.cpp
 @@ -1,3 +1,4 @@
@@ -192,7 +192,75 @@ index 82e499a..3f3692b 100644
  											{
  												settings_shown = true;
  
-@@ -2463,7 +2465,8 @@ void AppStage_ControllerSettings::handle_controller_list_response(
+@@ -1847,18 +1849,19 @@ void AppStage_ControllerSettings::renderUI()
+ 						ImGui::BeginChild("##CalibrationChild", ImVec2(0, lastChildVec.y + 16), true);
+ 						ImGui::BeginGroup();
+ 						{
+-							if (controllerInfo.ControllerType == PSMController_Move && controllerInfo.IsBluetooth)
+-							{
+-								if (controllerInfo.HasMagnetometer)
+-								{
++							if ((controllerInfo.ControllerType == PSMController_Move && controllerInfo.IsBluetooth) ||
++                                controllerInfo.ControllerType == PSMController_DualShock4)
++                            {
++								if (controllerInfo.ControllerType == PSMController_Move && controllerInfo.HasMagnetometer)
++                                {
+ 									if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconTarget(), "Calibrate Magnetometer"))
+ 									{
+ 										m_app->getAppStage<AppStage_MagnetometerCalibration>()->setBypassCalibrationFlag(false);
+ 										m_app->setAppStage(AppStage_MagnetometerCalibration::APP_STAGE_NAME);
+ 									}
+ 								}
+-								else
+-								{
++								else if (controllerInfo.ControllerType == PSMController_Move)
++                                {
+ 									AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconBan(), "Calibrate Magnetometer (Unavailable)");
+ 									ImGui::PushTextWrapPos();
+ 
+@@ -1883,6 +1886,14 @@ void AppStage_ControllerSettings::renderUI()
+ 									m_app->getAppStage<AppStage_AccelerometerCalibration>()->setBypassCalibrationFlag(false);
+ 									m_app->setAppStage(AppStage_AccelerometerCalibration::APP_STAGE_NAME);
+ 								}
++                                if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconTarget(), "Calibrate Optical Noise"))
++                                {
++                                    auto *stage=m_app->getAppStage<AppStage_OpticalCalibration>();
++                                    stage->setTargetControllerId(controllerInfo.ControllerID);
++                                    stage->setTargetTrackerId(-1); // Accept the currently visible tracker.
++                                    stage->setBypassCalibrationFlag(false);
++                                    m_app->setAppStage(AppStage_OpticalCalibration::APP_STAGE_NAME);
++                                }
+ 							}
+ 						}
+ 						ImGui::EndGroup();
+@@ -1899,7 +1910,7 @@ void AppStage_ControllerSettings::renderUI()
+ 						ImGui::BeginChild("##TestsChild", ImVec2(0, lastChildVec.y + 16), true);
+ 						ImGui::BeginGroup();
+ 						{
+-							if (controllerInfo.IsBluetooth || controllerInfo.ControllerType == PSMController_Virtual)
++							if (controllerInfo.IsBluetooth || controllerInfo.ControllerType == PSMController_Virtual || controllerInfo.ControllerType == PSMController_DualShock4)
+ 							{
+ 								if (controllerInfo.ControllerType == PSMController_Move)
+ 								{
+@@ -1937,6 +1948,17 @@ void AppStage_ControllerSettings::renderUI()
+ 									ImGui::Spacing();
+ 								}
+ 
++                                if(controllerInfo.ControllerType==PSMController_DualShock4 || controllerInfo.ControllerType==PSMController_Move)
++                                {
++                                    if(AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconSearch(), "Test Optical Tracking"))
++                                    {
++                                        auto *stage=m_app->getAppStage<AppStage_OpticalCalibration>();
++                                        stage->setTargetControllerId(controllerInfo.ControllerID);
++                                        stage->setTargetTrackerId(-1);
++                                        stage->setBypassCalibrationFlag(true);
++                                        m_app->setAppStage(AppStage_OpticalCalibration::APP_STAGE_NAME);
++                                    }
++                                }
+ 								if (controllerInfo.ControllerType == PSMController_Move ||
+ 									controllerInfo.ControllerType == PSMController_DualShock4)
+ 								{
+@@ -2463,7 +2485,8 @@ void AppStage_ControllerSettings::handle_controller_list_response(
                      ControllerInfo.GyroGainIndex = -1;
                  }
  
@@ -202,6 +270,29 @@ index 82e499a..3f3692b 100644
                      ControllerResponse.controller_type() == PSMoveProtocol::PSNAVI ||
                      ControllerResponse.controller_type() == PSMoveProtocol::VIRTUALCONTROLLER)
                  {
+@@ -2687,8 +2710,8 @@ void AppStage_ControllerSettings::show_position_filter_tooltip(const std::string
+ 		ImGui::SetTooltip(
+ 			"Optical smoothing filter using variance curve and IMU for smoothing.\n"
+ 			"Smooths optical tracking and reduces optical noise by tracker projection, distance and IMU.\n"
+-			"Requires calibration.\n"
+-			"(Use 'Calibrate Optical Noise' to calibrate)"
++			"Uses calibration; defaults apply until measured.\n"
++			"(Controller Settings > Calibration > Calibrate Optical Noise)"
+ 		);
+ 	}
+ 	else if (name == "PositionKalman")
+@@ -2745,9 +2768,9 @@ void AppStage_ControllerSettings::show_orientation_filter_tooltip(const std::str
+ 			"Optical orientation filter using variance curve and madgwick.\n"
+ 			"Smooths optical orintation and reduces optical orintation noise by tracker projection and distance.\n"
+ 			"Only works with Morpheus HMDs and DualShock4 controllers.\n"
+-			"Requires calibration.\n"
++			"Uses calibration; defaults apply until measured.\n"
+ 			"[Optical; Gyroscope]\n"
+-			"(Use 'Calibrate Optical Noise' to calibrate)"
++			"(Controller Settings > Calibration > Calibrate Optical Noise)"
+ 		);
+ 	}
+ 	else if (name == "OrientationExternal")
 diff --git a/src/psmoveconfigtool/AppStage_ControllerSettings.h b/src/psmoveconfigtool/AppStage_ControllerSettings.h
 index f6ec6ef..b49c8a3 100644
 --- a/src/psmoveconfigtool/AppStage_ControllerSettings.h
@@ -221,7 +312,7 @@ index c7eeb84..d4c3852 100644
  
  //-- includes -----
 diff --git a/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp b/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp
-index 06b3b6e..1ca2d3c 100644
+index 06b3b6e..ea9e40f 100644
 --- a/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp
 +++ b/src/psmoveconfigtool/AppStage_GyroscopeCalibration.cpp
 @@ -1,3 +1,4 @@
@@ -229,6 +320,45 @@ index 06b3b6e..1ca2d3c 100644
  //-- inludes -----
  #include "AppStage_GyroscopeCalibration.h"
  #include "AppStage_ControllerSettings.h"
+@@ -391,7 +392,7 @@ void AppStage_GyroscopeCalibration::render()
+ 
+ 				drawTransformedAxes(glm::scale(glm::mat4(1.f), glm::vec3(k_modelScale, k_modelScale, k_modelScale)), 20.f);
+ 
+-				drawPSMoveModel(worldTransform, glm::vec3(1.f, 1.f, 1.f));
++				drawController(m_controllerView, worldTransform);
+ 				drawTransformedAxes(worldTransform, 20.f);
+ 			}
+         } break;
+@@ -610,7 +611,7 @@ void AppStage_GyroscopeCalibration::renderUI()
+ 				const Eigen::EulerAnglesf euler_angles = eigen_quaternionf_to_euler_angles(eigen_quat);
+ 				orientation = PSM_QuatfCreate(eigen_quat.w(), eigen_quat.x(), eigen_quat.y(), eigen_quat.z());
+ 
+-				ImGui::Text("Pitch(x): %.2f, Yaw(y): %.2f, Roll(z): %.2f",
++				ImGui::Text("Gyro (deg/s): X %.2f, Y %.2f, Z %.2f",
+ 					m_lastCalibratedGyroscope.x * k_radians_to_degreees, 
+ 					m_lastCalibratedGyroscope.y * k_radians_to_degreees,
+ 					m_lastCalibratedGyroscope.z * k_radians_to_degreees);
+@@ -623,8 +624,10 @@ void AppStage_GyroscopeCalibration::renderUI()
+ 				ImGui::Separator();
+ 				ImGui::Image(AssetManager::getInstance()->getIconExclamation()->getImTextureId(), ImVec2(24, 24), ImVec2(0,0), ImVec2(1,1), AssetManager::k_imcolor_blue());
+ 				ImGui::SameLine();
+-				ImGui::TextColored(AssetManager::k_imcolor_blue(),
+-					"Press the OPTIONS button with the controller pointed straight forward to recenter it.");
++				ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+k_panel_width-32.f);
++                ImGui::TextColored(AssetManager::k_imcolor_blue(),
++					"Press OPTIONS with the controller pointed straight forward to recenter it.\nRecenter changes the tracking frame; repeat TV calibration afterward.");
++                ImGui::PopTextWrapPos();
+ 			}
+ 			else if (m_controllerView->ControllerType == PSMController_Move)
+ 			{
+@@ -909,6 +912,7 @@ static void drawController(PSMController *controllerView, const glm::mat4 &trans
+     switch(controllerView->ControllerType)
+     {
+     case PSMController_Move:
++    case PSMController_Virtual: // Virtual controllers use PS Move emulation.
+         drawPSMoveModel(transform, glm::vec3(1.f, 1.f, 1.f));
+         break;
+     case PSMController_DualShock4:
 diff --git a/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp b/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp
 index 9983ad3..df1db7c 100644
 --- a/src/psmoveconfigtool/AppStage_HMDGyroscopeCalibration.cpp
@@ -261,14 +391,249 @@ index 831d8ff..5f517d4 100644
  		ImGui::SetNextWindowPosCenter();
  		ImGui::Begin(szWindowTitle, nullptr, window_flags);
 diff --git a/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp b/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp
-index e10b140..914bfbb 100644
+index e10b140..27aef0c 100644
 --- a/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp
 +++ b/src/psmoveconfigtool/AppStage_OpticalCalibration.cpp
-@@ -1,3 +1,4 @@
+@@ -1,6 +1,9 @@
 +#include <chrono>
  //-- inludes -----
  #include "AppStage_OpticalCalibration.h"
  #include "AppStage_TrackerSettings.h"
++#include "AppStage_ControllerSettings.h"
++#include "OpticalCalibrationValidation.h"
+ #include "AppStage_MainMenu.h"
+ #include "App.h"
+ #include "Camera.h"
+@@ -89,6 +92,8 @@ struct PoseNoiseSamplesAtLocation
+ 			orientation_variance_scalar_rad_sqr += diff_from_mean*diff_from_mean;
+         }
+ 		orientation_variance_scalar_rad_sqr /= (N - 1.f);
++        position_variance_scalar_cm_sqr=std::max(position_variance_scalar_cm_sqr,1e-6f);
++        orientation_variance_scalar_rad_sqr=std::max(orientation_variance_scalar_rad_sqr,1e-8f);
+     }
+ };
+ 
+@@ -184,6 +189,8 @@ AppStage_OpticalCalibration::AppStage_OpticalCalibration(App *app)
+     : AppStage(app)
+     , m_menuState(AppStage_OpticalCalibration::inactive)
+     , m_bBypassCalibration(false)
++    , m_iTrackerId(-1)
++    , m_iControllerId(-1)
+     , m_controllerView(nullptr)
+     , m_isControllerStreamActive(false)
+     , m_lastControllerSeqNum(-1)
+@@ -213,9 +220,12 @@ void AppStage_OpticalCalibration::enter()
+ 
+     // Reset all of the sampling state
+ 	m_poseNoiseSamplesSet->clear();
++    m_savePending=false; m_saveSucceeded=false; m_saveAttempted=false; m_fitValid=false;
++    m_bLastProjectionAreaValid=false;
++    m_lastNoiseSampleTime=std::chrono::high_resolution_clock::time_point();
+ 
+     // Initialize the controller state
+-    assert(controllerInfo->ControllerID != -1);
++    assert(m_iControllerId != -1);
+     assert(m_controllerView == nullptr);
+ 	PSM_AllocateControllerListener(m_iControllerId);
+ 	m_controllerView= PSM_GetController(m_iControllerId);
+@@ -309,7 +319,7 @@ void AppStage_OpticalCalibration::update()
+ 			PSMTrackingProjection projection;
+ 			if (PSM_GetControllerProjectionOnTracker(m_controllerView->ControllerID, &trackerId, &projection) == PSMResult_Success)
+ 			{
+-				if (trackerId == m_iTrackerId)
++				if (m_iTrackerId < 0 || trackerId == m_iTrackerId)
+ 				{
+ 					float projection_area = PSM_TrackingProjectionGetArea(&projection);
+ 
+@@ -379,7 +389,9 @@ void AppStage_OpticalCalibration::update()
+ 				PoseNoiseSamplesAtLocation &poseNoiseSamples = m_poseNoiseSamplesSet->getCurrentLocationSamples();
+ 
+                 // Record the next noise sample
+-                if (poseNoiseSamples.sample_count < k_desired_noise_sample_count &&
++                if (bControllerDataUpdatedThisFrame &&
++                    std::chrono::duration<double>(now-m_lastNoiseSampleTime).count()>=.03 &&
++                    poseNoiseSamples.sample_count < k_desired_noise_sample_count &&
+ 					m_bLastMulticamOrientationValid && m_bLastMulticamPositionValid && m_bLastProjectionAreaValid)
+                 {
+ 					poseNoiseSamples.position_samples_cm[poseNoiseSamples.sample_count] = 
+@@ -389,7 +401,14 @@ void AppStage_OpticalCalibration::update()
+ 					poseNoiseSamples.projection_area_samples[poseNoiseSamples.sample_count] =
+ 						m_lastProjectionArea;
+ 
+-                    ++poseNoiseSamples.sample_count;
++                    if(poseNoiseSamples.position_samples_cm[poseNoiseSamples.sample_count].allFinite() &&
++                       poseNoiseSamples.orientation_samples[poseNoiseSamples.sample_count].coeffs().allFinite() &&
++                       poseNoiseSamples.orientation_samples[poseNoiseSamples.sample_count].norm()>.5f &&
++                       poseNoiseSamples.orientation_samples[poseNoiseSamples.sample_count].norm()<1.5f &&
++                       std::isfinite(m_lastProjectionArea) && m_lastProjectionArea>1.f) {
++                        ++poseNoiseSamples.sample_count;
++                        m_lastNoiseSampleTime=now;
++                    }
+                 }
+ 
+                 // See if we have completed sampling at this location
+@@ -408,20 +427,10 @@ void AppStage_OpticalCalibration::update()
+ 						// Compute a best fit function to the area/variance function
+ 						m_poseNoiseSamplesSet->computeVarianceBestFit();
+ 
+-						// Tell the server about the new variance calibration
+-						if (m_controllerView->ControllerType == PSMController_DualShock4)
+-						{
+-							request_set_optical_calibration(
+-								m_poseNoiseSamplesSet->position_variance_curve.y(), m_poseNoiseSamplesSet->position_variance_curve.x(),
+-								m_poseNoiseSamplesSet->orientation_variance_curve.y(), m_poseNoiseSamplesSet->orientation_variance_curve.x());
+-						}
+-						else
+-						{
+-							request_set_optical_calibration(
+-								m_poseNoiseSamplesSet->position_variance_curve.y(), m_poseNoiseSamplesSet->position_variance_curve.x(),
+-								0.f, 0.f);
+-						}
+-
++                        const auto &set=*m_poseNoiseSamplesSet;
++                        m_fitValid=optical_calibration::valid_curve(set.position_variance_curve.y(),set.position_variance_curve.x(),set.far_proj_area,set.near_proj_area) &&
++                            (m_controllerView->ControllerType!=PSMController_DualShock4 || optical_calibration::valid_curve(set.orientation_variance_curve.y(),set.orientation_variance_curve.x(),set.far_proj_area,set.near_proj_area));
++                        m_saveSucceeded=false; m_saveAttempted=false;
+ 						setState(eCalibrationMenuState::measureComplete);
+ 					}
+ 					// Otherwise move on to the next location
+@@ -577,7 +586,7 @@ void AppStage_OpticalCalibration::renderUI()
+ 			ImGui::Separator();
+             if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconCheck(), "OK"))
+             {
+-                request_exit_to_app_stage(AppStage_TrackerSettings::APP_STAGE_NAME);
++                request_exit_to_app_stage(AppStage_ControllerSettings::APP_STAGE_NAME);
+             }
+ 
+             ImGui::SameLine();
+@@ -670,7 +679,7 @@ void AppStage_OpticalCalibration::renderUI()
+ 			ImGui::SameLine();
+ 			if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconBan(), "Cancel"))
+ 			{
+-				request_exit_to_app_stage(AppStage_TrackerSettings::APP_STAGE_NAME);
++				request_exit_to_app_stage(AppStage_ControllerSettings::APP_STAGE_NAME);
+ 			}
+ 
+ 			ImGui::SetWindowSize(ImVec2(k_panel_width, 0));
+@@ -705,13 +714,13 @@ void AppStage_OpticalCalibration::renderUI()
+ 			ImGui::Separator();
+ 
+ 			ImGui::Text("Tracker Projection Area %.1f pixels^2", m_lastProjectionArea);
+-            ImGui::Text("[Sampling...]");
++            ImGui::TextWrapped("Sampling fresh controller updates at no more than 33 Hz. Keep holding the sampling button and keep the controller stationary.");
+             ImGui::ProgressBar(sampleFraction);
+ 
+ 			ImGui::Separator();
+             if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconBan(), "Cancel"))
+             {
+-                request_exit_to_app_stage(AppStage_TrackerSettings::APP_STAGE_NAME);
++                request_exit_to_app_stage(AppStage_ControllerSettings::APP_STAGE_NAME);
+             }
+ 
+ 			ImGui::SetWindowSize(ImVec2(k_panel_width, 0));
+@@ -724,27 +733,33 @@ void AppStage_OpticalCalibration::renderUI()
+ 
+ 			ImGui::Image(AssetManager::getInstance()->getIconCheck()->getImTextureId(), ImVec2(32, 32));
+ 			ImGui::SameLine();
+-			ImGui::Text("Sampling complete!");
+-			ImGui::Text("Press OK to continue or Redo to recalibration.");
++			ImGui::Text(m_fitValid?"Sampling complete - review before saving.":"Fit rejected - nothing saved.");
++            ImGui::TextWrapped(m_fitValid?"Save applies the measured noise curves. Cancel leaves calibration unchanged.":"Need finite, decreasing noise curves and at least 20% projection-area spread. Redo and vary controller distance while keeping it still at each location.");
++            if(m_savePending) ImGui::Text("Waiting for service save acknowledgement...");
++            if(m_saveSucceeded) ImGui::TextWrapped("Service confirmed calibration saved. Record a new TV reference after changing native calibration or recentering.");
++            if(m_saveAttempted && !m_savePending && !m_saveSucceeded) ImGui::TextWrapped("Save was not confirmed by the service. Retry or inspect the device configuration; no success is claimed.");
+ 
+ 			ImGui::Separator();
+-            if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconCheck(), "OK"))
++            if (m_fitValid && !m_savePending && AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconCheck(), m_saveSucceeded?"Test Saved Calibration":"Save Optical Calibration"))
+             {
+ 				PSM_SetControllerLEDOverrideColor(m_controllerView->ControllerID, 0, 0, 0);
+-                setState(eCalibrationMenuState::test);
++                if(m_saveSucceeded) setState(eCalibrationMenuState::test);
++                else request_set_optical_calibration(m_poseNoiseSamplesSet->position_variance_curve.y(),m_poseNoiseSamplesSet->position_variance_curve.x(),
++                    m_controllerView->ControllerType==PSMController_DualShock4?m_poseNoiseSamplesSet->orientation_variance_curve.y():0.f,
++                    m_controllerView->ControllerType==PSMController_DualShock4?m_poseNoiseSamplesSet->orientation_variance_curve.x():0.f);
+             }
+             
+ 			ImGui::SameLine();
+-            if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconUpdate(), "Redo"))
++            if (!m_savePending && AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconUpdate(), "Redo"))
+             {
+ 				m_poseNoiseSamplesSet->clear();
+                 setState(eCalibrationMenuState::waitForStable);
+             }
+            
+ 			ImGui::SameLine();
+-            if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconBan(), "Cancel"))
++            if (!m_savePending && AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconBan(), m_saveSucceeded?"Return to Controllers":"Cancel"))
+             {
+-                request_exit_to_app_stage(AppStage_TrackerSettings::APP_STAGE_NAME);
++                request_exit_to_app_stage(AppStage_ControllerSettings::APP_STAGE_NAME);
+             }
+ 
+ 			ImGui::SetWindowSize(ImVec2(k_panel_width, 0));
+@@ -805,7 +820,7 @@ void AppStage_OpticalCalibration::renderUI()
+ 			ImGui::Separator();
+             if (AssetManager::ImGuiButtonIcon(AssetManager::getInstance()->getIconCheck(), "OK"))
+             {
+-                request_exit_to_app_stage(AppStage_TrackerSettings::APP_STAGE_NAME);
++                request_exit_to_app_stage(AppStage_ControllerSettings::APP_STAGE_NAME);
+             }
+ 
+             ImGui::SameLine();
+@@ -912,6 +927,7 @@ void AppStage_OpticalCalibration::handle_tracker_list_response(
+ 
+ 			// Save the controller list state (used in rendering)
+ 			thisPtr->m_trackerList = response_message->payload.tracker_list;
++            if(thisPtr->m_trackerList.count<=0) {thisPtr->setState(eCalibrationMenuState::failedTrackerListRequest);return;}
+ 
+ 			// Start streaming in controller data
+             {
+@@ -950,8 +966,18 @@ void AppStage_OpticalCalibration::request_set_optical_calibration(
+ 	calibration->set_orientation_variance_exp_fit_b(orientation_var_exp_fit_b);
+ 
+ 	PSMRequestID request_id;
+-	PSM_SendOpaqueRequest(&request, &request_id);
+-	PSM_EatResponse(request_id);
++    m_saveAttempted=true; m_savePending=true;
++    if(PSM_SendOpaqueRequest(&request,&request_id)==PSMResult_RequestSent)
++        PSM_RegisterCallback(request_id,AppStage_OpticalCalibration::handle_save_response,this);
++    else {m_savePending=false;m_saveSucceeded=false;}
++
++}
++
++void AppStage_OpticalCalibration::handle_save_response(const PSMResponseMessage *response,void *userdata)
++{
++    auto *self=static_cast<AppStage_OpticalCalibration*>(userdata);
++    self->m_savePending=false;
++    self->m_saveSucceeded=response->result_code==PSMResult_Success;
+ }
+ 
+ void AppStage_OpticalCalibration::handle_acquire_controller(
+diff --git a/src/psmoveconfigtool/AppStage_OpticalCalibration.h b/src/psmoveconfigtool/AppStage_OpticalCalibration.h
+index 4f8477b..07dc8c6 100644
+--- a/src/psmoveconfigtool/AppStage_OpticalCalibration.h
++++ b/src/psmoveconfigtool/AppStage_OpticalCalibration.h
+@@ -65,6 +65,7 @@ protected:
+ 	static void handle_tracker_list_response(
+ 		const PSMResponseMessage *response_message,
+ 		void *userdata);
++    static void handle_save_response(const PSMResponseMessage *response, void *userdata);
+     void request_set_optical_calibration(
+ 		const float position_var_exp_fit_a, const float position_var_exp_fit_b,
+ 		const float orientation_var_exp_fit_a, const float orientation_var_exp_fit_b);
+@@ -79,6 +80,11 @@ private:
+ 
+     eCalibrationMenuState m_menuState;
+     bool m_bBypassCalibration;
++    std::chrono::high_resolution_clock::time_point m_lastNoiseSampleTime;
++    bool m_saveAttempted=false;
++    bool m_savePending=false;
++    bool m_saveSucceeded=false;
++    bool m_fitValid=false;
+ 	int m_iTrackerId;
+ 	int m_iControllerId;
+ 
 diff --git a/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp b/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp
 index b5a6e46..85d21b4 100644
 --- a/src/psmoveconfigtool/AppStage_OpticalRecenter.cpp
@@ -355,6 +720,29 @@ index 2e2a9e8..dabd839 100644
  	q.normalize();
  
  	return q;
+diff --git a/src/psmovemath/OpticalCalibrationValidation.h b/src/psmovemath/OpticalCalibrationValidation.h
+new file mode 100644
+index 0000000..09c33a8
+--- /dev/null
++++ b/src/psmovemath/OpticalCalibrationValidation.h
+@@ -0,0 +1,17 @@
++#pragma once
++#include <cmath>
++
++namespace optical_calibration {
++inline bool valid_coefficients(float a,float b) {
++    return std::isfinite(a) && std::isfinite(b) && a>0.f && a<1e8f && b<=0.f && b>=-1.f;
++}
++inline bool valid_area_coverage(float far_area,float near_area) {
++    return std::isfinite(far_area) && std::isfinite(near_area) && far_area>1.f && near_area>=far_area*1.2f;
++}
++inline bool valid_curve(float a,float b,float far_area,float near_area) {
++    if(!valid_coefficients(a,b) || !valid_area_coverage(far_area,near_area)) return false;
++    const double far_value=double(a)*std::exp(double(b)*far_area);
++    const double near_value=double(a)*std::exp(double(b)*near_area);
++    return std::isfinite(far_value) && std::isfinite(near_value) && far_value>1e-30 && near_value>1e-30;
++}
++}
 diff --git a/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp b/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp
 index 74c3694..7ae4fce 100644
 --- a/src/psmoveservice/Device/Manager/DeviceTypeManager.cpp

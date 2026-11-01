@@ -1,6 +1,7 @@
 // Regression tests compile the actual patched upstream filter/math sources.
 #include "OrientationFilter.h"
 #include "MathEigen.h"
+#include "OpticalCalibrationValidation.h"
 #include <iostream>
 #include <stdexcept>
 #include <cmath>
@@ -13,6 +14,13 @@ static float angle(const Eigen::Quaternionf& a,const Eigen::Quaternionf& b) {
     return 2.f*acosf(fminf(1.f,fabsf(a.normalized().dot(b.normalized()))));
 }
 int main() {
+    require(optical_calibration::valid_curve(.12f,-.002f,100,1000),"normal decreasing optical-noise curve must be accepted");
+    require(optical_calibration::valid_curve(.01f,0.f,100,1000),"constant finite variance is a valid curve");
+    require(!optical_calibration::valid_curve(.12f,-.002f,100,110),"insufficient distance/projection coverage must not be saved");
+    require(!optical_calibration::valid_curve(0,-.002f,100,1000),"zero variance coefficient must not be saved");
+    require(!optical_calibration::valid_curve(.12f,.002f,100,1000),"increasing optical variance fit must be rejected");
+    require(!optical_calibration::valid_curve(std::numeric_limits<float>::quiet_NaN(),-.002f,100,1000),"nonfinite fit must not be saved");
+    require(!optical_calibration::valid_curve(.12f,-1.f,100,1000),"underflowing fit must not be saved");
     const float pi=3.14159265358979323846f;
     auto identity=Eigen::Quaternionf::Identity();
     Eigen::Quaternionf equivalent(-identity.coeffs());
